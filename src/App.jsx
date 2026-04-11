@@ -33,6 +33,32 @@ function getDaysLeft(resetAt,cycleDays){
   if(!resetAt) return cycleDays;
   return Math.max(0, cycleDays - Math.floor((Date.now()-resetAt)/86400000));
 }
+// Returns a YYYY-MM-DD string for any Date (used for daily streak keys)
+function getDayKey(date){
+  const d=date||new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+}
+// Returns YYYY-MM-DD for today
+function todayKey(){ return getDayKey(new Date()); }
+// Returns YYYY-MM-DD for yesterday
+function yesterdayKey(){
+  const d=new Date(); d.setDate(d.getDate()-1); return getDayKey(d);
+}
+// Calculate daily streak from the checkedDays set (Set of YYYY-MM-DD strings)
+// Counts backwards from today: how many consecutive days have a check-in?
+function calcDailyStreak(checkedDays){
+  if(!checkedDays||checkedDays.length===0) return 0;
+  const set=new Set(checkedDays);
+  const today=new Date();
+  let streak=0;
+  // Start from today; if today not checked, start from yesterday
+  let cursor=set.has(getDayKey(today))?new Date():new Date(today.setDate(today.getDate()-1));
+  while(set.has(getDayKey(cursor))){
+    streak++;
+    cursor.setDate(cursor.getDate()-1);
+  }
+  return streak;
+}
 // Returns which weekday names have fully passed this week (Mon=0 … today excluded)
 function passedDaysThisWeek(){
   const dow = new Date().getDay(); // 0=Sun,1=Mon...
@@ -377,12 +403,15 @@ function PlayerCard({player,isMe,onCheckin,onClaim,gameCode,weekKey,rewards}){
   const [expanded,setExpanded]=useState(isMe);
   const points=player.points||0;
   const claimed=player.claimed||[];
-  const streak=player.streak||0;
   const stats=player.stats||{};
   const claimable=rewards.find(r=>r.pts<=points&&!claimed.includes(r.pts));
   const nextReward=rewards.find(r=>r.pts>points&&!claimed.includes(r.pts));
   const wkCheckins=(player.allCheckins||{})[weekKey]||{};
   const thisWeekPts=Object.entries(wkCheckins).reduce((s,[k,v])=>v?s+(k==="Sat"?10:5):s,0);
+  // Daily streak = consecutive calendar days
+  const dailyStreak=calcDailyStreak(stats.checkedDays||[]);
+  // Running total = all gym days this cycle
+  const totalDays=stats.totalDays||0;
 
   return(
     <div style={{...S.card,border:isMe?`1px solid ${player.color}44`:"1px solid #1e1e1e",position:"relative",overflow:"hidden"}}>
@@ -404,10 +433,15 @@ function PlayerCard({player,isMe,onCheckin,onClaim,gameCode,weekKey,rewards}){
             <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:22,color:player.color,letterSpacing:1.5,lineHeight:1}}>{player.name}</div>
             {isMe&&<button onClick={()=>setExpanded(v=>!v)} style={{background:"none",border:"1px solid #2a2a2a",borderRadius:8,color:"#555",fontFamily:"monospace",fontSize:9,padding:"2px 7px",cursor:"pointer",letterSpacing:1}}>{expanded?"LESS":"MORE"}</button>}
           </div>
+          {/* Row 1: streaks */}
           <div style={{display:"flex",gap:6,marginTop:8}}>
-            <Stat label="STREAK" value={`${streak}w`} color={streak>=4?"#10b981":"#888"}/>
-            <Stat label="THIS WK" value={`+${thisWeekPts}`} color={player.color}/>
-            <Stat label="GYM DAYS" value={stats.totalDays||0} color="#888"/>
+            <Stat label="🔥 HOT STREAK" value={`${dailyStreak}d`} color={dailyStreak>=7?"#ef4444":dailyStreak>=3?"#f59e0b":"#888"}/>
+            <Stat label="📅 TOTAL DAYS" value={totalDays} color={player.color}/>
+          </div>
+          {/* Row 2: this week + this week pts */}
+          <div style={{display:"flex",gap:6,marginTop:6}}>
+            <Stat label="THIS WEEK" value={`+${thisWeekPts}`} color={player.color}/>
+            <Stat label="BEST WEEK" value={`+${stats.bestWeek||0}`} color="#10b981"/>
           </div>
         </div>
       </div>
@@ -649,6 +683,9 @@ function GameScreen({gameCode,playerId,onLeave}){
           updates[`players.${pid}.weeklyPts`]=0;
           updates[`players.${pid}.streak`]=0;
           updates[`players.${pid}.pointsLog`]=[];
+          updates[`players.${pid}.stats.totalDays`]=0;
+          updates[`players.${pid}.stats.checkedDays`]=[];
+          updates[`players.${pid}.stats.dailyStreak`]=0;
         });
         await updateDoc(ref,updates);
         return;
@@ -681,17 +718,30 @@ function GameScreen({gameCode,playerId,onLeave}){
     const newPoints=Math.min((me.points||0)+pts,TIER_3);
     const newAllCheckins={...allCheckins,[wk]:{...wkCheckins,[day]:true}};
     const isNewWeek=me.weekKey!==wk;
+
+    // Weekly history
     let weeklyHistory=me.stats?.weeklyHistory||[];
     if(isNewWeek&&(me.weeklyPts||0)>0){
       weeklyHistory=[...weeklyHistory,{label:me.weekKey,pts:me.weeklyPts}].slice(-16);
     }
     const weeklyPts=(isNewWeek?0:(me.weeklyPts||0))+pts;
-    const bestWeek=Math.max(me.stats?.bestWeek||0,weeklyPts);
-    const totalDays=(me.stats?.totalDays||0)+1;
-    let streak=me.streak||0;
-    if(isNewWeek) streak=Object.keys(me.allCheckins||{}).length>0?streak+1:1;
 
-    // Append to points log
+    // Running total: every check-in adds 1
+    const totalDays=(me.stats?.totalDays||0)+1;
+    const bestWeek=Math.max(me.stats?.bestWeek||0,weeklyPts);
+
+    // Daily streak: store a list of YYYY-MM-DD keys for every day checked in
+    // Saturday counts as today's date too since it's the same calendar day
+    const todayStr=todayKey();
+    const checkedDays=me.stats?.checkedDays||[];
+    // Only add today's key once (prevent duplicate if they check Sat same day)
+    const newCheckedDays=checkedDays.includes(todayStr)?checkedDays:[...checkedDays,todayStr];
+    // Prune to last 120 days to avoid unbounded growth
+    const prunedCheckedDays=newCheckedDays.slice(-120);
+    // Recalculate streak from the new list
+    const newDailyStreak=calcDailyStreak(prunedCheckedDays);
+
+    // Points log
     const pointsLog=[...(me.pointsLog||[]),{day,pts,ts:Date.now()}].slice(-100);
 
     await updateDoc(ref,{
@@ -699,13 +749,14 @@ function GameScreen({gameCode,playerId,onLeave}){
       [`players.${playerId}.allCheckins`]:newAllCheckins,
       [`players.${playerId}.weekKey`]:wk,
       [`players.${playerId}.weeklyPts`]:weeklyPts,
-      [`players.${playerId}.streak`]:streak,
       [`players.${playerId}.pointsLog`]:pointsLog,
       [`players.${playerId}.stats.totalDays`]:totalDays,
       [`players.${playerId}.stats.bestWeek`]:bestWeek,
       [`players.${playerId}.stats.weeklyHistory`]:weeklyHistory,
+      [`players.${playerId}.stats.checkedDays`]:prunedCheckedDays,
+      [`players.${playerId}.stats.dailyStreak`]:newDailyStreak,
     });
-    showToast(`${day} logged! +${pts} pts 🔥`);
+    showToast(`${day} logged! +${pts} pts 🔥${newDailyStreak>=3?` ${newDailyStreak} day streak!`:""}`);
   },[gameCode,playerId]);
 
   const handleClaim=useCallback(async(pts)=>{
@@ -733,6 +784,9 @@ function GameScreen({gameCode,playerId,onLeave}){
       updates[`players.${pid}.weeklyPts`]=0;
       updates[`players.${pid}.streak`]=0;
       updates[`players.${pid}.pointsLog`]=[];
+      updates[`players.${pid}.stats.totalDays`]=0;
+      updates[`players.${pid}.stats.checkedDays`]=[];
+      updates[`players.${pid}.stats.dailyStreak`]=0;
     });
     await updateDoc(ref,updates);
     setShowReset(false);
@@ -817,10 +871,13 @@ function GameScreen({gameCode,playerId,onLeave}){
           <div style={{animation:"slideUp .3s ease"}}>
             <div style={{...S.card,marginBottom:14}}>
               <div style={S.lbl}>MY STATS</div>
+              <div style={{display:"flex",gap:8,marginBottom:8}}>
+                <Stat label="🔥 HOT STREAK" value={`${calcDailyStreak(me.stats?.checkedDays||[])}d`} color={calcDailyStreak(me.stats?.checkedDays||[])>=7?"#ef4444":calcDailyStreak(me.stats?.checkedDays||[])>=3?"#f59e0b":"#888"}/>
+                <Stat label="📅 TOTAL DAYS" value={me.stats?.totalDays||0} color={me.color}/>
+              </div>
               <div style={{display:"flex",gap:8}}>
-                <Stat label="TOTAL DAYS" value={me.stats?.totalDays||0} color={me.color}/>
                 <Stat label="BEST WEEK" value={`+${me.stats?.bestWeek||0}`} color="#10b981"/>
-                <Stat label="STREAK" value={`${me.streak||0}w`} color={me.streak>=4?"#f59e0b":"#888"}/>
+                <Stat label="THIS WEEK" value={`+${Object.entries((me.allCheckins||{})[weekKey]||{}).reduce((s,[k,v])=>v?s+(k==="Sat"?10:5):s,0)}`} color={me.color}/>
               </div>
             </div>
             <History history={me.stats?.weeklyHistory}/>
