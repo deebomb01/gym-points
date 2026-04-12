@@ -72,7 +72,14 @@ function passedDaysThisWeek(){
 function formatTime(ts){ return new Date(ts).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}); }
 function formatDate(ts){ return new Date(ts).toLocaleDateString([],{month:"short",day:"numeric"}); }
 function buildRewards(amounts){
-  return [40,80,120].map((pts,i)=>({ pts, icon:["🎁","🏆","👑"][i], color:["#f59e0b","#ef4444","#8b5cf6"][i], label:amounts?.[i]?`$${amounts[i]} Reward`:`Reward ${i+1}` }));
+  return [40,80,120].map((pts,i)=>({
+    pts,
+    coinCost:pts, // coin cost mirrors point tier exactly
+    icon:["🎁","🏆","👑"][i],
+    color:["#f59e0b","#ef4444","#8b5cf6"][i],
+    label:amounts?.[i]?`$${amounts[i]} Reward`:`Reward ${i+1}`,
+    amount:amounts?.[i]||0,
+  }));
 }
 function isFrozen(player){
   if(!player||!player.frozenUntil) return false;
@@ -651,12 +658,27 @@ function PlayerCard({player,isMe,onCheckin,onClaim,gameCode,weekKey,rewards,onOp
         })}
       </div>
 
-      {claimable&&isMe&&(
-        <button onClick={()=>onClaim(claimable.pts)} style={{width:"100%",padding:"10px 16px",borderRadius:12,marginBottom:12,background:`linear-gradient(135deg,${claimable.color}22,${claimable.color}0d)`,border:`1px solid ${claimable.color}66`,color:"#fff",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"space-between",animation:"glowPulse 2s ease infinite"}}>
-          <span style={{fontSize:12,fontFamily:"monospace"}}>{claimable.icon} {claimable.label} UNLOCKED!</span>
-          <span style={{fontSize:10,background:claimable.color,color:"#000",borderRadius:6,padding:"2px 10px",fontFamily:"monospace"}}>CLAIM →</span>
-        </button>
-      )}
+      {isMe&&rewards.map(r=>{
+        const alreadyClaimed=claimed.includes(r.pts);
+        const hasGymPts=points>=r.pts;
+        const hasCoins=bankCoins>=r.coinCost;
+        const canClaim=!alreadyClaimed&&(hasGymPts||hasCoins);
+        if(alreadyClaimed) return null;
+        if(!hasGymPts&&!hasCoins) return null;
+        return(
+          <button key={r.pts} onClick={()=>onClaim(r.pts)} style={{width:"100%",padding:"10px 16px",borderRadius:12,marginBottom:8,background:`linear-gradient(135deg,${r.color}22,${r.color}0d)`,border:`1px solid ${r.color}66`,color:"#fff",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"space-between",animation:"glowPulse 2s ease infinite"}}>
+            <div>
+              <div style={{fontSize:12,fontFamily:"monospace"}}>{r.icon} {r.label} {hasGymPts?"UNLOCKED!":"AVAILABLE WITH COINS"}</div>
+              <div style={{fontSize:9,fontFamily:"monospace",color:"#888",marginTop:2}}>
+                {hasGymPts?"Earned by gym pts":""}
+                {hasGymPts&&hasCoins?" · ":""}
+                {hasCoins?`${r.coinCost}🪙 will be deducted`:""}
+              </div>
+            </div>
+            <span style={{fontSize:10,background:r.color,color:"#000",borderRadius:6,padding:"2px 10px",fontFamily:"monospace",flexShrink:0}}>CLAIM →</span>
+          </button>
+        );
+      })}
 
       {(expanded||!isMe)&&<DayGrid player={player} isMe={isMe} onCheckin={onCheckin} weekKey={weekKey}/>}
 
@@ -800,9 +822,36 @@ function JoinScreen({onBack,onJoined,prefillCode}){
       )}
       {step===2&&(
         <div style={S.card}>
-          <div style={{marginBottom:16,padding:"10px 14px",background:"#0f0f0f",borderRadius:12,border:"1px solid #1e1e1e"}}>
-            <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:20,color:"#fff",letterSpacing:2}}>{gameInfo?.gameName||"Gym Points"}</div>
-            <div style={{fontFamily:"monospace",fontSize:10,color:"#555",marginTop:2}}>{Object.keys(gameInfo?.players||{}).length} player{Object.keys(gameInfo?.players||{}).length!==1?"s":""} · {gameInfo?.cycleDays||30}-day cycle</div>
+          <div style={{marginBottom:16,padding:"14px",background:"#0f0f0f",borderRadius:12,border:"1px solid #1e1e1e"}}>
+            <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:22,color:"#fff",letterSpacing:2,marginBottom:6}}>{gameInfo?.gameName||"Gym Points"}</div>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+              <div style={{fontFamily:"monospace",fontSize:10,color:"#555",background:"#1a1a1a",borderRadius:8,padding:"4px 8px"}}>
+                👥 {Object.keys(gameInfo?.players||{}).length} player{Object.keys(gameInfo?.players||{}).length!==1?"s":""}
+              </div>
+              <div style={{fontFamily:"monospace",fontSize:10,color:"#555",background:"#1a1a1a",borderRadius:8,padding:"4px 8px"}}>
+                🔄 {gameInfo?.cycleDays||30}-day cycle
+              </div>
+              <div style={{fontFamily:"monospace",fontSize:10,color:"#555",background:"#1a1a1a",borderRadius:8,padding:"4px 8px"}}>
+                📅 {getDaysLeft(gameInfo?.resetAt, gameInfo?.cycleDays||30)} days left
+              </div>
+            </div>
+            {Object.keys(gameInfo?.players||{}).length>0&&(
+              <div style={{marginTop:10}}>
+                <div style={{fontFamily:"monospace",fontSize:9,color:"#444",letterSpacing:1,marginBottom:6}}>CURRENT PLAYERS</div>
+                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                  {Object.values(gameInfo?.players||{}).sort((a,b)=>(b.points||0)-(a.points||0)).map(p=>(
+                    <div key={p.id} style={{display:"flex",alignItems:"center",gap:4,background:"#141414",borderRadius:8,padding:"4px 8px",border:`1px solid ${p.color}33`}}>
+                      <span style={{fontSize:12}}>{p.emoji}</span>
+                      <span style={{fontFamily:"monospace",fontSize:10,color:p.color}}>{p.name}</span>
+                      <span style={{fontFamily:"monospace",fontSize:9,color:"#555"}}>{p.points||0}pts</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div style={{marginTop:10,fontFamily:"monospace",fontSize:10,color:"#f59e0b"}}>
+              ✓ You can join mid-game! You'll start earning points immediately.
+            </div>
           </div>
           <div style={S.row}><label style={S.lbl}>YOUR NAME</label><input style={S.inp} value={name} onChange={e=>setName(e.target.value)} placeholder="Your name..." maxLength={20}/></div>
           <div style={S.row}><label style={S.lbl}>PICK YOUR EMOJI</label><EmojiPicker value={emoji} onChange={setEmoji}/></div>
@@ -987,12 +1036,32 @@ function GameScreen({gameCode,playerId,onLeave}){
     const ref=doc(db,"games",gameCode);
     const snap=await getDoc(ref);
     if(!snap.exists()) return;
-    const me=snap.data().players[playerId];
-    if(!me||(me.claimed||[]).includes(pts)) return;
-    await updateDoc(ref,{[`players.${playerId}.claimed`]:[...(me.claimed||[]),pts]});
-    const rws=buildRewards(snap.data().rewardAmounts);
+    const data=snap.data();
+    const me=data.players[playerId];
+    if(!me) return;
+    const rws=buildRewards(data.rewardAmounts);
     const r=rws.find(r=>r.pts===pts);
-    showToast(`${r.icon} ${r.label} claimed! Go collect! 🎉`);
+    if(!r) return;
+    const alreadyClaimed=(me.claimed||[]).includes(pts);
+    if(alreadyClaimed){ showToast("Already claimed!"); return; }
+    const coins=me.bankCoins||0;
+    // Two ways to claim: gym points reached threshold OR enough coins to buy
+    const hasGymPts=(me.points||0)>=pts;
+    const hasCoins=coins>=r.coinCost;
+    if(!hasGymPts&&!hasCoins){
+      showToast(`Need ${pts} pts OR ${r.coinCost}🪙 to claim ${r.label}`);
+      return;
+    }
+    const updates={[`players.${playerId}.claimed`]:[...(me.claimed||[]),pts]};
+    // Deduct coins when claiming (either path)
+    const deduct=hasGymPts?r.coinCost:r.coinCost; // always deduct coins
+    const newCoins=Math.max(0,coins-deduct);
+    updates[`players.${playerId}.bankCoins`]=newCoins;
+    // Log to points log
+    const logEntry={type:"spend",coins:-deduct,label:`Claimed ${r.label}`,ts:Date.now()};
+    updates[`players.${playerId}.pointsLog`]=[...(me.pointsLog||[]),logEntry].slice(-100);
+    await updateDoc(ref,updates);
+    showToast(`${r.icon} ${r.label} claimed! -${deduct}🪙 · Go collect! 🎉`);
   },[gameCode,playerId]);
 
   const handlePowerup=useCallback(async(pu,targetId)=>{
@@ -1157,13 +1226,22 @@ function GameScreen({gameCode,playerId,onLeave}){
 
         {/* Rewards */}
         <div style={{display:"flex",gap:6,marginBottom:14}}>
-          {rewards.map(r=>(
-            <div key={r.pts} style={{flex:1,textAlign:"center",background:"#141414",borderRadius:12,border:`1px solid ${r.color}22`,padding:"8px 4px"}}>
-              <div style={{fontSize:18}}>{r.icon}</div>
-              <div style={{fontFamily:"monospace",fontSize:9,color:r.color,marginTop:2}}>{r.pts} PTS</div>
-              <div style={{fontFamily:"monospace",fontSize:9,color:"#aaa",fontWeight:"bold"}}>{r.label}</div>
-            </div>
-          ))}
+          {rewards.map(r=>{
+            const mePts=me?.points||0;
+            const meCoins=me?.bankCoins||0;
+            const meHas=mePts>=r.pts;
+            const meCanBuy=meCoins>=r.coinCost;
+            const meClaimed=me?.claimed?.includes(r.pts);
+            return(
+              <div key={r.pts} style={{flex:1,textAlign:"center",background:"#141414",borderRadius:12,border:`1px solid ${meClaimed?"#10b98144":meHas||meCanBuy?r.color+"44":r.color+"22"}`,padding:"8px 4px",position:"relative"}}>
+                {meClaimed&&<div style={{position:"absolute",top:4,right:4,fontSize:10}}>✅</div>}
+                <div style={{fontSize:18}}>{r.icon}</div>
+                <div style={{fontFamily:"monospace",fontSize:9,color:r.color,marginTop:2}}>{r.pts} PTS</div>
+                <div style={{fontFamily:"monospace",fontSize:9,color:"#aaa",fontWeight:"bold"}}>{r.label}</div>
+                <div style={{fontFamily:"monospace",fontSize:8,color:"#555",marginTop:2}}>{r.coinCost}🪙</div>
+              </div>
+            );
+          })}
         </div>
 
         {/* Tabs */}
@@ -1212,9 +1290,11 @@ function GameScreen({gameCode,playerId,onLeave}){
             "Mon–Fri: +5 pts · Saturday bonus: +10 pts",
             "Points carry forward every week until cycle resets",
             `Gym cycle auto-resets after ${cycleDays} days`,
-            "Bank coins (🪙) reset every 60 days independently",
-            "Earn coins via check-ins, 3/14/30-day streak bonuses",
-            "Spend coins in the Power-Up Shop for abilities",
+            "Earn coins 🪙 matching every gym point you earn",
+            "Streak bonuses: 3-day=+5🪙 · 14-day=+15🪙 · 30-day=+30🪙",
+            "Claim rewards with gym pts OR buy with coins (40/80/120🪙)",
+            "Spend coins in the Shop for power-ups & emoji unlocks",
+            "Coins bank resets every 60 days independently",
           ].map((r,i)=>(
             <div key={i} style={{fontFamily:"monospace",fontSize:11,color:"#555",marginBottom:5}}>· {r}</div>
           ))}
