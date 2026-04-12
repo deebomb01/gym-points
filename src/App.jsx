@@ -75,10 +75,10 @@ function buildRewards(amounts){
   return [40,80,120].map((pts,i)=>({ pts, icon:["🎁","🏆","👑"][i], color:["#f59e0b","#ef4444","#8b5cf6"][i], label:amounts?.[i]?`$${amounts[i]} Reward`:`Reward ${i+1}` }));
 }
 function isFrozen(player){
-  if(!player.frozenUntil) return false;
+  if(!player||!player.frozenUntil) return false;
   return Date.now()<player.frozenUntil;
 }
-function isBlocked(player){ return !!player.shield; }
+function isBlocked(player){ return !!(player&&player.shield); }
 
 // ─── Styles ───────────────────────────────────────────────
 const S={
@@ -584,7 +584,7 @@ function EditProfile({player,gameCode,onClose}){
 
 // ─── Player card ──────────────────────────────────────────
 function PlayerCard({player,isMe,onCheckin,onClaim,gameCode,weekKey,rewards,onOpenShop}){
-  const [expanded,setExpanded]=useState(isMe);
+  const [expanded,setExpanded]=useState(true); // always start open
   const points=player.points||0;
   const claimed=player.claimed||[];
   const stats=player.stats||{};
@@ -596,6 +596,8 @@ function PlayerCard({player,isMe,onCheckin,onClaim,gameCode,weekKey,rewards,onOp
   const totalDays=stats.totalDays||0;
   const frozen=isFrozen(player);
   const shielded=isBlocked(player);
+  // Safe-read new fields that may not exist on older player records
+  const bankCoins=player.bankCoins||0;
 
   return(
     <div style={{...S.card,border:isMe?`1px solid ${player.color}44`:frozen?"1px solid #06b6d433":shielded?"1px solid #3b82f633":"1px solid #1e1e1e",position:"relative",overflow:"hidden"}}>
@@ -623,7 +625,7 @@ function PlayerCard({player,isMe,onCheckin,onClaim,gameCode,weekKey,rewards,onOp
           <div style={{display:"flex",gap:6,alignItems:"center"}}>
             <Stat label="THIS WEEK" value={`+${thisWeekPts}`} color={player.color}/>
             <Stat label="BEST WK" value={`+${stats.bestWeek||0}`} color="#10b981"/>
-            {isMe&&<div style={{flexShrink:0}}><CoinBadge coins={player.bankCoins||0} small/></div>}
+            {isMe&&<div style={{flexShrink:0}}><CoinBadge coins={bankCoins} small/></div>}
           </div>
         </div>
       </div>
@@ -852,7 +854,7 @@ function GameScreen({gameCode,playerId,onLeave}){
       const now=Date.now();
       const bankUpdates={};
       Object.values(data.players||{}).forEach(p=>{
-        if(p.bankResetAt&&getDaysLeft(p.bankResetAt,BANK_RESET_DAYS)===0){
+        if(p.bankResetAt&&p.bankResetAt>0&&getDaysLeft(p.bankResetAt,BANK_RESET_DAYS)===0){
           bankUpdates[`players.${p.id}.bankCoins`]=0;
           bankUpdates[`players.${p.id}.bankResetAt`]=now;
         }
@@ -880,7 +882,11 @@ function GameScreen({gameCode,playerId,onLeave}){
     const snap=await getDoc(ref);
     if(!snap.exists()) return;
     const me=snap.data().players[playerId];
-    if(!me||isFrozen(me)) return;
+    if(!me) return;
+    // Initialize any missing fields for players who joined before the bank update
+    const bankCoins=me.bankCoins||0;
+    const bankResetAt=me.bankResetAt||Date.now();
+    if(isFrozen(me)){ showToast("🧊 You are frozen! Wait for it to thaw."); return; }
     const allCheckins=me.allCheckins||{};
     const wkCheckins=allCheckins[wk]||{};
     if(wkCheckins[day]) return;
@@ -917,7 +923,7 @@ function GameScreen({gameCode,playerId,onLeave}){
         bonusMsg=` · ${sb.label} +${sb.coins}🪙`;
       }
     }
-    const newBankCoins=(me.bankCoins||0)+coinsEarned;
+    const newBankCoins=bankCoins+coinsEarned;
 
     // Points log
     const logEntry={day,pts:earnedPts,ts:Date.now(),label:isDouble?`${day} (DOUBLE!) check-in`:undefined};
@@ -933,6 +939,7 @@ function GameScreen({gameCode,playerId,onLeave}){
       [`players.${playerId}.weeklyPts`]:weeklyPts,
       [`players.${playerId}.pointsLog`]:pointsLog,
       [`players.${playerId}.bankCoins`]:newBankCoins,
+      [`players.${playerId}.bankResetAt`]:bankResetAt,
       [`players.${playerId}.doubleNext`]:false,
       [`players.${playerId}.stats.totalDays`]:totalDays,
       [`players.${playerId}.stats.bestWeek`]:bestWeek,
@@ -1113,7 +1120,7 @@ function GameScreen({gameCode,playerId,onLeave}){
 
       <div style={S.wrap}>
         <div style={{marginTop:14}}><CycleBar resetAt={gameData.resetAt} cycleDays={cycleDays} gameName={gameData.gameName}/></div>
-        {me&&<BankBar bankCoins={me.bankCoins||0} bankResetAt={me.bankResetAt}/>}
+        {me&&<BankBar bankCoins={me.bankCoins||0} bankResetAt={me.bankResetAt||Date.now()}/>}
 
         {/* Rewards */}
         <div style={{display:"flex",gap:6,marginBottom:14}}>
