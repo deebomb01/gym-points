@@ -467,10 +467,15 @@ function PointsLog({log}){
 
 // ─── Day grid ─────────────────────────────────────────────
 function DayGrid({player,isMe,onCheckin,weekKey}){
-  const wkCheckins=(player.allCheckins||{})[weekKey]||{};
+  // Safely build this week's checkins, handling any legacy data format
+  const rawCheckins=player.allCheckins||{};
+  let wkCheckins={};
+  const weekVal=rawCheckins[weekKey];
+  if(weekVal&&typeof weekVal==="object") wkCheckins=weekVal;
+
   const missed=passedDaysThisWeek();
   const frozen=isFrozen(player);
-  const sabotaged=(player.sabotaged||{})[weekKey]||[];
+  const sabotaged=Array.isArray((player.sabotaged||{})[weekKey])?(player.sabotaged[weekKey]):[];
 
   return(
     <div>
@@ -879,43 +884,67 @@ function GameScreen({gameCode,playerId,onLeave}){
   const handleCheckin=useCallback(async(day,pts)=>{
     const wk=getWeekKey();
     const ref=doc(db,"games",gameCode);
-    const snap=await getDoc(ref);
-    if(!snap.exists()) return;
-    const me=snap.data().players[playerId];
-    if(!me) return;
-    // Initialize any missing fields for players who joined before the bank update
-    const bankCoins=me.bankCoins||0;
-    const bankResetAt=me.bankResetAt||Date.now();
-    if(isFrozen(me)){ showToast("🧊 You are frozen! Wait for it to thaw."); return; }
-    const allCheckins=me.allCheckins||{};
+    let snap;
+    try{ snap=await getDoc(ref); }catch(e){ showToast("Connection error. Try again."); return; }
+    if(!snap.exists()){ showToast("Game not found."); return; }
+    const data=snap.data();
+    const me=data.players?.[playerId];
+    if(!me){ showToast("Player not found."); return; }
+
+    // Freeze check
+    if(me.frozenUntil&&Date.now()<me.frozenUntil){
+      showToast("🧊 You are frozen! Wait for it to thaw.");
+      return;
+    }
+
+    // Build clean allCheckins — handle any legacy data format
+    let allCheckins={};
+    if(me.allCheckins&&typeof me.allCheckins==="object"){
+      Object.entries(me.allCheckins).forEach(([k,v])=>{
+        if(typeof v==="object"&&v!==null){
+          // Already correct nested format: { "wk_...": { Mon: true } }
+          allCheckins[k]=v;
+        } else if(typeof v==="boolean"){
+          // Legacy flat format: { "wk_...-Mon": true } — skip, treat as empty
+        }
+      });
+    }
+
     const wkCheckins=allCheckins[wk]||{};
-    if(wkCheckins[day]) return;
-    // Check sabotage
-    if((me.sabotaged||{})[wk]?.includes(day)){ showToast("💣 That day was sabotaged!"); return; }
+    if(wkCheckins[day]){ showToast("Already logged "+day+"!"); return; }
+
+    // Sabotage check
+    if(Array.isArray((me.sabotaged||{})[wk])&&(me.sabotaged[wk]).includes(day)){
+      showToast("💣 That day was sabotaged!"); return;
+    }
 
     const isDouble=!!me.doubleNext;
     const earnedPts=isDouble?pts*2:pts;
     const newPoints=Math.min((me.points||0)+earnedPts,TIER_3);
     const newAllCheckins={...allCheckins,[wk]:{...wkCheckins,[day]:true}};
-    const isNewWeek=me.weekKey!==wk;
+    const isNewWeek=(me.weekKey||"")!==wk;
 
     // Weekly history
-    let weeklyHistory=me.stats?.weeklyHistory||[];
-    if(isNewWeek&&(me.weeklyPts||0)>0) weeklyHistory=[...weeklyHistory,{label:me.weekKey,pts:me.weeklyPts}].slice(-16);
+    let weeklyHistory=(me.stats&&me.stats.weeklyHistory)||[];
+    if(isNewWeek&&(me.weeklyPts||0)>0){
+      weeklyHistory=[...weeklyHistory,{label:me.weekKey,pts:me.weeklyPts}].slice(-16);
+    }
     const weeklyPts=(isNewWeek?0:(me.weeklyPts||0))+earnedPts;
-    const bestWeek=Math.max(me.stats?.bestWeek||0,weeklyPts);
-    const totalDays=(me.stats?.totalDays||0)+1;
+    const bestWeek=Math.max((me.stats&&me.stats.bestWeek)||0,weeklyPts);
+    const totalDays=((me.stats&&me.stats.totalDays)||0)+1;
 
-    // Daily streak
+    // Daily streak using YYYY-MM-DD keys
     const todayStr=todayKey();
-    const checkedDays=me.stats?.checkedDays||[];
+    const checkedDays=(me.stats&&me.stats.checkedDays)||[];
     const newCheckedDays=checkedDays.includes(todayStr)?checkedDays:[...checkedDays,todayStr];
     const prunedCheckedDays=newCheckedDays.slice(-120);
     const newDailyStreak=calcDailyStreak(prunedCheckedDays);
 
-    // Coins: same as pts + streak bonuses
+    // Coins
     const prevStreak=calcDailyStreak(checkedDays);
-    let coinsEarned=earnedPts; // 1 coin per point
+    const bankCoins=me.bankCoins||0;
+    const bankResetAt=me.bankResetAt||Date.now();
+    let coinsEarned=earnedPts;
     let bonusMsg="";
     for(const sb of STREAK_BONUSES){
       if(newDailyStreak>=sb.days&&prevStreak<sb.days){
@@ -926,28 +955,32 @@ function GameScreen({gameCode,playerId,onLeave}){
     const newBankCoins=bankCoins+coinsEarned;
 
     // Points log
-    const logEntry={day,pts:earnedPts,ts:Date.now(),label:isDouble?`${day} (DOUBLE!) check-in`:undefined};
+    const logEntry={day,pts:earnedPts,ts:Date.now(),label:isDouble?`${day} (DOUBLE!) check-in`:null};
     const pointsLog=[...(me.pointsLog||[]),logEntry].slice(-100);
     if(coinsEarned>earnedPts){
       pointsLog.push({type:"coin",coins:coinsEarned-earnedPts,label:bonusMsg.trim(),ts:Date.now()});
     }
 
-    const updates={
-      [`players.${playerId}.points`]:newPoints,
-      [`players.${playerId}.allCheckins`]:newAllCheckins,
-      [`players.${playerId}.weekKey`]:wk,
-      [`players.${playerId}.weeklyPts`]:weeklyPts,
-      [`players.${playerId}.pointsLog`]:pointsLog,
-      [`players.${playerId}.bankCoins`]:newBankCoins,
-      [`players.${playerId}.bankResetAt`]:bankResetAt,
-      [`players.${playerId}.doubleNext`]:false,
-      [`players.${playerId}.stats.totalDays`]:totalDays,
-      [`players.${playerId}.stats.bestWeek`]:bestWeek,
-      [`players.${playerId}.stats.weeklyHistory`]:weeklyHistory,
-      [`players.${playerId}.stats.checkedDays`]:prunedCheckedDays,
-    };
-    await updateDoc(ref,updates);
-    showToast(`${day} logged! +${earnedPts} pts · +${coinsEarned}🪙${bonusMsg}${isDouble?" ⚡DOUBLE!":""}`);
+    try{
+      await updateDoc(ref,{
+        [`players.${playerId}.points`]:newPoints,
+        [`players.${playerId}.allCheckins`]:newAllCheckins,
+        [`players.${playerId}.weekKey`]:wk,
+        [`players.${playerId}.weeklyPts`]:weeklyPts,
+        [`players.${playerId}.pointsLog`]:pointsLog,
+        [`players.${playerId}.bankCoins`]:newBankCoins,
+        [`players.${playerId}.bankResetAt`]:bankResetAt,
+        [`players.${playerId}.doubleNext`]:false,
+        [`players.${playerId}.stats.totalDays`]:totalDays,
+        [`players.${playerId}.stats.bestWeek`]:bestWeek,
+        [`players.${playerId}.stats.weeklyHistory`]:weeklyHistory,
+        [`players.${playerId}.stats.checkedDays`]:prunedCheckedDays,
+      });
+      showToast(`${day} logged! +${earnedPts} pts · +${coinsEarned}🪙${bonusMsg}${isDouble?" ⚡DOUBLE!":""}`);
+    }catch(e){
+      console.error("Checkin error:",e);
+      showToast("Save failed — check your connection.");
+    }
   },[gameCode,playerId]);
 
   const handleClaim=useCallback(async(pts)=>{
