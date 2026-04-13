@@ -1,10 +1,10 @@
 {
   "files": {
-    "main.js": "/gym-points/static/js/main.8dda97dc.js",
+    "main.js": "/gym-points/static/js/main.787dde7c.js",
     "index.html": "/gym-points/index.html",
-    "main.8dda97dc.js.map": "/gym-points/static/js/main.8dda97dc.js.map"
+    "main.787dde7c.js.map": "/gym-points/static/js/main.787dde7c.js.map"
   },
   "entrypoints": [
-    "static/js/main.8dda97dc.js"
+    "static/js/main.787dde7c.js"
   ]
 }
