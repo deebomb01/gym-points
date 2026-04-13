@@ -325,19 +325,26 @@ function BankBar({bankCoins,bankResetAt}){
 function CycleBar({resetAt,cycleDays,gameName}){
   const left=getDaysLeft(resetAt,cycleDays);
   const pct=((cycleDays-left)/cycleDays)*100;
-  const col=left>cycleDays*.33?"#10b981":left>cycleDays*.15?"#f59e0b":"#ef4444";
+  const col=left<=3?"#ef4444":left>cycleDays*.33?"#10b981":left>cycleDays*.15?"#f59e0b":"#ef4444";
+  const isFinalDays=left<=3&&left>0;
   return(
-    <div style={{...S.card,marginBottom:14}}>
+    <div style={{...S.card,marginBottom:14,border:isFinalDays?"1px solid #ef444433":"1px solid #1e1e1e"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
         <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:18,letterSpacing:2,color:"#fff"}}>{gameName||"GYM POINTS"}</div>
-        <div style={{fontFamily:"monospace",fontSize:11,color:col}}>{left}d left</div>
+        <div style={{fontFamily:"monospace",fontSize:11,color:col}}>
+          {isFinalDays?`⚔️ FINAL ${left}d!`:`${left}d left`}
+        </div>
       </div>
       <div style={{height:6,borderRadius:3,background:"#1e1e1e",overflow:"hidden"}}>
-        <div style={{height:"100%",borderRadius:3,width:`${pct}%`,background:col,transition:"width .5s ease"}}/>
+        <div style={{height:"100%",borderRadius:3,width:`${pct}%`,background:col,transition:"width .5s ease",
+          boxShadow:isFinalDays?`0 0 8px ${col}`:"none",
+        }}/>
       </div>
       <div style={{display:"flex",justifyContent:"space-between",marginTop:4}}>
         <div style={{fontFamily:"monospace",fontSize:9,color:"#333"}}>START</div>
-        <div style={{fontFamily:"monospace",fontSize:9,color:"#333"}}>DAY {cycleDays} → RESET</div>
+        <div style={{fontFamily:"monospace",fontSize:9,color:isFinalDays?"#ef4444":"#333"}}>
+          {isFinalDays?"⚠️ WINNER ANNOUNCED SOON":"DAY "+cycleDays+" → CYCLE END"}
+        </div>
       </div>
     </div>
   );
@@ -1088,6 +1095,190 @@ function JoinScreen({onBack,onJoined,prefillCode}){
   );
 }
 
+// ─── Winner Screen ───────────────────────────────────────
+function WinnerScreen({gameData,playerId,gameCode}){
+  const [readyForNew,setReadyForNew]=useState(false);
+  const [newEmoji,setNewEmoji]=useState(null);
+  const [newColor,setNewColor]=useState(null);
+  const [launching,setLaunching]=useState(false);
+
+  const me=gameData.players?.[playerId];
+  const standings=gameData.finalStandings||
+    Object.values(gameData.players||{}).sort((a,b)=>(b.points||0)-(a.points||0))
+      .map(p=>({id:p.id,name:p.name,emoji:p.emoji,color:p.color,points:p.points||0,totalDays:p.stats?.totalDays||0}));
+  const winner=standings[0]||{};
+  const iWon=winner.id===playerId;
+  const medals=["🥇","🥈","🥉"];
+
+  // Firework particles
+  const fireworks=Array.from({length:50},(_,i)=>({
+    id:i,
+    x:10+Math.random()*80,
+    y:5+Math.random()*60,
+    color:["#f59e0b","#ef4444","#8b5cf6","#10b981","#3b82f6","#ec4899","#06b6d4"][Math.floor(Math.random()*7)],
+    size:4+Math.random()*8,
+    delay:Math.random()*2,
+    dur:0.6+Math.random()*0.8,
+    angle:Math.random()*360,
+    dist:30+Math.random()*120,
+  }));
+
+  // My current emoji/color defaults
+  const myEmoji=newEmoji||me?.emoji||"💪";
+  const myColor=newColor||me?.color||COLORS[0];
+
+  async function handleStartNew(){
+    setLaunching(true);
+    const ref=doc(db,"games",gameCode);
+    const snap=await getDoc(ref);
+    if(!snap.exists()){ setLaunching(false); return; }
+    const data=snap.data();
+    const now=Date.now();
+    const updates={
+      status:"active",
+      resetAt:now,
+      activityLog:[],
+      winnerId:null,
+      finalStandings:null,
+    };
+    // Save emoji/color choice for me, reset all scores
+    Object.keys(data.players||{}).forEach(pid=>{
+      updates[`players.${pid}.points`]=0;
+      updates[`players.${pid}.claimed`]=[];
+      updates[`players.${pid}.allCheckins`]={};
+      updates[`players.${pid}.weekKey`]=getWeekKey();
+      updates[`players.${pid}.weeklyPts`]=0;
+      updates[`players.${pid}.pointsLog`]=[];
+      updates[`players.${pid}.stats.totalDays`]=0;
+      updates[`players.${pid}.stats.checkedDays`]=[];
+      updates[`players.${pid}.shield`]=false;
+      updates[`players.${pid}.frozenUntil`]=null;
+      updates[`players.${pid}.sabotaged`]={};
+      updates[`players.${pid}.doubleNext`]=false;
+    });
+    // Apply my new emoji/color if changed
+    if(newEmoji) updates[`players.${playerId}.emoji`]=newEmoji;
+    if(newColor) updates[`players.${playerId}.color`]=newColor;
+    await updateDoc(ref,updates);
+    setLaunching(false);
+  }
+
+  return(
+    <div style={{minHeight:"100vh",background:"#0a0a0a",position:"relative",overflow:"hidden"}}>
+      <style>{`
+        @keyframes fwBurst{0%{transform:translate(0,0) scale(1);opacity:1}100%{transform:translate(var(--fx),var(--fy)) scale(0);opacity:0}}
+        @keyframes fwLoop{0%,100%{opacity:0}10%{opacity:1}90%{opacity:1}}
+        @keyframes winnerPop{0%{transform:scale(0) rotate(-10deg);opacity:0}60%{transform:scale(1.1) rotate(2deg)}100%{transform:scale(1) rotate(0);opacity:1}}
+        @keyframes shimmer{0%,100%{opacity:.7}50%{opacity:1}}
+        @keyframes slideUp{from{transform:translateY(30px);opacity:0}to{transform:translateY(0);opacity:1}}
+        @keyframes crownFloat{0%,100%{transform:translateY(0) rotate(-3deg)}50%{transform:translateY(-10px) rotate(3deg)}}
+      `}</style>
+
+      {/* Continuous fireworks */}
+      {fireworks.map(f=>(
+        <div key={f.id} style={{
+          position:"fixed",
+          left:`${f.x}%`, top:`${f.y}%`,
+          width:f.size, height:f.size,
+          borderRadius:"50%",
+          background:f.color,
+          "--fx":`${Math.cos(f.angle*Math.PI/180)*f.dist}px`,
+          "--fy":`${Math.sin(f.angle*Math.PI/180)*f.dist}px`,
+          animation:`fwBurst ${f.dur}s ${f.delay}s ease-out infinite, fwLoop ${f.dur+f.delay}s ${f.delay}s infinite`,
+          pointerEvents:"none",
+          boxShadow:`0 0 6px ${f.color}`,
+          zIndex:0,
+        }}/>
+      ))}
+
+      <div style={{position:"relative",zIndex:1,maxWidth:480,margin:"0 auto",padding:"40px 20px 80px"}}>
+
+        {/* Champion header */}
+        <div style={{textAlign:"center",marginBottom:32}}>
+          <div style={{fontFamily:"monospace",fontSize:11,color:"#555",letterSpacing:3,marginBottom:12}}>
+            ── CYCLE COMPLETE ──
+          </div>
+          <div style={{fontSize:72,animation:"crownFloat 2s ease-in-out infinite",marginBottom:8}}>👑</div>
+          <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:44,letterSpacing:4,
+            background:`linear-gradient(135deg,#f59e0b,#ef4444)`,
+            WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",
+            lineHeight:1,marginBottom:8,
+          }}>CHAMPION!</div>
+          <div style={{animation:"winnerPop .6s cubic-bezier(.4,2,.6,1) .3s both"}}>
+            <div style={{fontSize:56,marginBottom:8}}>{winner.emoji}</div>
+            <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:36,color:winner.color,
+              letterSpacing:2,textShadow:`0 0 30px ${winner.color}`,
+            }}>{winner.name}</div>
+            <div style={{fontFamily:"monospace",fontSize:14,color:"#aaa",marginTop:6}}>
+              {winner.points} pts · {winner.totalDays||0} gym days
+            </div>
+            {iWon&&(
+              <div style={{fontFamily:"monospace",fontSize:13,color:"#f59e0b",marginTop:8,
+                animation:"shimmer 1.5s ease infinite",letterSpacing:2,
+              }}>⚡ THAT'S YOU! AMAZING WORK! ⚡</div>
+            )}
+          </div>
+        </div>
+
+        {/* Final standings */}
+        <div style={{...S.card,marginBottom:20,animation:"slideUp .5s ease .4s both"}}>
+          <div style={S.lbl}>FINAL STANDINGS</div>
+          {standings.map((p,i)=>(
+            <div key={p.id} style={{
+              display:"flex",alignItems:"center",gap:12,
+              padding:"10px 0",
+              borderBottom:i<standings.length-1?"1px solid #1a1a1a":"none",
+              opacity:i===0?1:0.8,
+            }}>
+              <div style={{fontSize:22,width:28,textAlign:"center"}}>{medals[i]||`${i+1}`}</div>
+              <div style={{fontSize:24}}>{p.emoji}</div>
+              <div style={{flex:1}}>
+                <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:18,
+                  color:p.id===playerId?p.color:"#fff",letterSpacing:1,
+                }}>{p.name}{p.id===playerId?" (you)":""}</div>
+                <div style={{fontFamily:"monospace",fontSize:10,color:"#555",marginTop:2}}>
+                  {p.totalDays||0} days attended
+                </div>
+              </div>
+              <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:28,
+                color:p.color,textShadow:`0 0 12px ${p.color}55`,
+              }}>{p.points}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Customize before new session */}
+        {!readyForNew?(
+          <button onClick={()=>setReadyForNew(true)} style={{
+            ...S.btn("#f59e0b"),marginBottom:12,
+          }}>🔄 READY FOR NEW SESSION?</button>
+        ):(
+          <div style={{...S.card,animation:"slideUp .4s ease both"}}>
+            <div style={S.lbl}>UPDATE YOUR LOOK FOR NEXT CYCLE</div>
+            <div style={S.row}>
+              <label style={S.lbl}>PICK EMOJI</label>
+              <EmojiPicker value={myEmoji} onChange={setNewEmoji} unlockedExtras={me?.unlockedEmojis||[]}/>
+            </div>
+            <div style={{...S.row,marginBottom:20}}>
+              <label style={S.lbl}>PICK COLOR</label>
+              <ColorPicker value={myColor} onChange={setNewColor}/>
+            </div>
+            <div style={{fontFamily:"monospace",fontSize:11,color:"#555",marginBottom:14,textAlign:"center"}}>
+              Anyone can launch the new session — all players will be reset.
+            </div>
+            <button onClick={handleStartNew} disabled={launching} style={{
+              ...S.btn("#10b981"),opacity:launching?.6:1,
+            }}>{launching?"LAUNCHING...":"🚀 START NEW SESSION!"}</button>
+            <button onClick={()=>setReadyForNew(false)} style={{
+              ...S.btn("#333",true),color:"#666",marginTop:8,
+            }}>← GO BACK</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Game screen ──────────────────────────────────────────
 function GameScreen({gameCode,playerId,onLeave}){
   const [gameData,setGameData]=useState(null);
@@ -1109,26 +1300,42 @@ function GameScreen({gameCode,playerId,onLeave}){
       if(!snap.exists()) return;
       const data=snap.data();
       const cycleDays=data.cycleDays||30;
-      // Auto-reset gym cycle
-      if(getDaysLeft(data.resetAt,cycleDays)===0){
-        const updates={resetAt:Date.now()};
-        Object.keys(data.players||{}).forEach(pid=>{
-          updates[`players.${pid}.points`]=0;
-          updates[`players.${pid}.claimed`]=[];
-          updates[`players.${pid}.allCheckins`]={};
-          updates[`players.${pid}.weekKey`]=getWeekKey();
-          updates[`players.${pid}.weeklyPts`]=0;
-          updates[`players.${pid}.pointsLog`]=[];
-          updates[`players.${pid}.stats.totalDays`]=0;
-          updates[`players.${pid}.stats.checkedDays`]=[];
-          updates[`players.${pid}.stats.dailyStreak`]=0;
-          updates[`players.${pid}.shield`]=false;
-          updates[`players.${pid}.frozenUntil`]=null;
-          updates[`players.${pid}.sabotaged`]={};
+      // Cycle finished — enter winner screen instead of silent reset
+      if(getDaysLeft(data.resetAt,cycleDays)===0&&data.status!=="finished"){
+        // Capture final standings before freezing the game
+        const players=Object.values(data.players||{});
+        const winner=players.reduce((best,p)=>(p.points||0)>(best.points||0)?p:best, players[0]||{});
+        const finalStandings=players
+          .sort((a,b)=>(b.points||0)-(a.points||0))
+          .map(p=>({id:p.id,name:p.name,emoji:p.emoji,color:p.color,points:p.points||0,totalDays:p.stats?.totalDays||0}));
+        await updateDoc(ref,{
+          status:"finished",
+          winnerId:winner.id||null,
+          finalStandings,
+          finishedAt:Date.now(),
         });
-        await updateDoc(ref,updates);
         return;
       }
+      // Weekly auto-reset: clear day buttons each Monday, keep points
+      const wk=getWeekKey();
+      const weekResetUpdates={};
+      Object.values(data.players||{}).forEach(p=>{
+        if((p.weekKey||"")!==wk){
+          // Save last week's pts to history before clearing
+          const hist=p.stats?.weeklyHistory||[];
+          if((p.weeklyPts||0)>0){
+            hist.push({label:p.weekKey,pts:p.weeklyPts});
+            if(hist.length>16) hist.shift();
+            weekResetUpdates[`players.${p.id}.stats.weeklyHistory`]=hist;
+          }
+          weekResetUpdates[`players.${p.id}.weekKey`]=wk;
+          weekResetUpdates[`players.${p.id}.weeklyPts`]=0;
+          // Clear sabotage and freeze for new week
+          weekResetUpdates[`players.${p.id}.sabotaged`]={};
+          weekResetUpdates[`players.${p.id}.frozenUntil`]=null;
+        }
+      });
+      if(Object.keys(weekResetUpdates).length>0) await updateDoc(ref,weekResetUpdates);
       // Auto-reset bank (independently, every 60 days per player)
       const now=Date.now();
       const bankUpdates={};
@@ -1455,7 +1662,7 @@ function GameScreen({gameCode,playerId,onLeave}){
     const ref=doc(db,"games",gameCode);
     const snap=await getDoc(ref);
     if(!snap.exists()) return;
-    const updates={resetAt:Date.now(),activityLog:[]};
+    const updates={resetAt:Date.now(),activityLog:[],status:"active",winnerId:null,finalStandings:null};
     Object.keys(snap.data().players||{}).forEach(pid=>{
       updates[`players.${pid}.points`]=0;
       updates[`players.${pid}.claimed`]=[];
@@ -1486,6 +1693,11 @@ function GameScreen({gameCode,playerId,onLeave}){
       <div style={{fontFamily:"monospace",color:"#444",textAlign:"center"}}><div style={{fontSize:36,marginBottom:12}}>⏳</div>Loading...</div>
     </div>
   );
+
+  // Show winner screen when cycle is finished
+  if(gameData.status==="finished"){
+    return <WinnerScreen gameData={gameData} playerId={playerId} gameCode={gameCode}/>;
+  }
 
   const players=Object.values(gameData.players||{}).sort((a,b)=>(b.points||0)-(a.points||0));
   const me=gameData.players?.[playerId];
