@@ -17,21 +17,21 @@ const CYCLE_OPTIONS = [
   { days:90, label:"90 Days", sub:"3 months" },
 ];
 
-// ─── Power-ups ────────────────────────────────────────────
+// ─── Jutsu (Power-ups) ───────────────────────────────────
 const POWERUPS = [
-  { id:"steal",     icon:"🥷", name:"STEAL",        cost:35, color:"#ef4444", desc:"Take 5 pts from any player",            target:"player" },
-  { id:"block",     icon:"🛡️", name:"BLOCK",        cost:35, color:"#3b82f6", desc:"Shield: absorbs next steal & reveals thief", target:"self" },
-  { id:"freeze",    icon:"🧊", name:"FREEZE",       cost:20, color:"#06b6d4", desc:"Stop a player checking in for 24h",     target:"player" },
-  { id:"double",    icon:"⚡", name:"DOUBLE",       cost:20, color:"#f59e0b", desc:"Your next check-in earns 2× pts",       target:"self" },
-  { id:"bonus",     icon:"🎁", name:"BONUS DAY",    cost:35, color:"#10b981", desc:"Grant an extra check-in to any player", target:"player" },
-  { id:"sabotage",  icon:"💣", name:"SABOTAGE",     cost:40, color:"#8b5cf6", desc:"Block one day for a player this week",  target:"player" },
+  { id:"steal",    icon:"🥷", name:"SHADOW STEP",      cost:35, color:"#ef4444", desc:"Vanish into the shadows — steal 5 pts from a rival",           flavor:"A shinobi never shows their face.", target:"player" },
+  { id:"block",    icon:"🛡️", name:"SPIRIT BARRIER",   cost:35, color:"#3b82f6", desc:"Erect an unseen shield — blocks the next attack & reveals attacker", flavor:"My aura will not be broken.",         target:"self"   },
+  { id:"freeze",   icon:"🧊", name:"GLACIAL BIND",      cost:20, color:"#06b6d4", desc:"Seal a rival in ice — stops their training for 24h",            flavor:"You cannot move. You cannot train.",  target:"player" },
+  { id:"double",   icon:"⚡", name:"ULTRA INSTINCT",    cost:20, color:"#f59e0b", desc:"Tap into hidden power — next workout earns 2× pts",             flavor:"My body moves on its own...",         target:"self"   },
+  { id:"bonus",    icon:"🌿", name:"SAGE MODE",         cost:35, color:"#10b981", desc:"Channel nature energy — grant a bonus training day",            flavor:"Nature itself powers your training.", target:"player" },
+  { id:"sabotage", icon:"👁️", name:"DARK ILLUSION",    cost:40, color:"#8b5cf6", desc:"Cast a genjutsu — one training day disappears for a rival",      flavor:"What you see is not real.",           target:"player" },
 ];
 
-// ─── Streak bonus thresholds ──────────────────────────────
+// ─── Power level milestones (streak bonuses) ─────────────
 const STREAK_BONUSES = [
-  { days:3,  coins:5,  label:"3-day streak bonus!"  },
-  { days:14, coins:15, label:"14-day streak bonus!" },
-  { days:30, coins:30, label:"30-day streak bonus!" },
+  { days:3,  coins:5,  label:"Power level rising! 3-day streak"  },
+  { days:14, coins:15, label:"Chunin-level focus! 14-day streak" },
+  { days:30, coins:30, label:"You've reached Kage rank! 30-day streak" },
 ];
 
 // ─── Helpers ──────────────────────────────────────────────
@@ -68,6 +68,25 @@ function calcDailyStreak(checkedDays){
 function passedDaysThisWeek(){
   const monBased=(new Date().getDay()+6)%7;
   return DAYS.slice(0,Math.min(monBased,5));
+}
+// Returns the current day name ("Mon"–"Sat") or null if Sun
+function getTodayName(){
+  const dow=(new Date().getDay()+6)%7; // Mon=0…Sat=5, Sun=6
+  if(dow===6) return null; // Sunday — no gym day
+  return dow<5?DAYS[dow]:"Sat";
+}
+// Returns yesterday's day name, or null if today is Mon (can't go back past last week)
+function getYesterdayName(){
+  const d=new Date(); d.setDate(d.getDate()-1);
+  const dow=(d.getDay()+6)%7;
+  if(dow===6) return null; // yesterday was Sunday
+  return dow<5?DAYS[dow]:"Sat";
+}
+// Checkin count for a given day key (supports 2nd workout stored as day+"_2")
+function getCheckinCount(wkCheckins,day){
+  const first=!!wkCheckins[day];
+  const second=!!wkCheckins[day+"_2"];
+  return first?(second?2:1):0;
 }
 function formatTime(ts){ return new Date(ts).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}); }
 function formatDate(ts){ return new Date(ts).toLocaleDateString([],{month:"short",day:"numeric"}); }
@@ -106,18 +125,112 @@ function Toast({msg}){
   return <div style={{position:"fixed",top:80,left:"50%",transform:"translateX(-50%)",background:"#1c1c1c",border:"1px solid #333",borderRadius:12,padding:"10px 24px",fontFamily:"monospace",fontSize:12,color:"#fff",zIndex:300,boxShadow:"0 8px 40px #000a",whiteSpace:"nowrap",maxWidth:"90vw"}}>{msg}</div>;
 }
 
-// ─── Celebration ──────────────────────────────────────────
+// ─── Celebration (tiered anime animations) ────────────────
 function Celebration({reward,onDone}){
-  useEffect(()=>{const t=setTimeout(onDone,3500);return()=>clearTimeout(t);},[onDone]);
-  const particles=Array.from({length:32},(_,i)=>({id:i,x:Math.random()*100,delay:Math.random()*.8,size:5+Math.random()*10,color:COLORS[Math.floor(Math.random()*COLORS.length)],dur:1.4+Math.random()}));
+  useEffect(()=>{const t=setTimeout(onDone,4000);return()=>clearTimeout(t);},[onDone]);
+
+  // Tier 1 (40pts) = cherry blossom petals 🌸
+  // Tier 2 (80pts) = ki energy burst ⚡
+  // Tier 3 (120pts) = manga flash + all combined 👑
+  const tier=reward.pts>=120?3:reward.pts>=80?2:1;
+
+  // Blossom petals
+  const petals=Array.from({length:28},(_,i)=>({
+    id:i, x:Math.random()*110-5,
+    delay:Math.random()*1.2, size:8+Math.random()*14,
+    rot:Math.random()*360, dur:2+Math.random()*1.5,
+    drift:(Math.random()-0.5)*120,
+  }));
+
+  // Ki burst rings
+  const rings=Array.from({length:6},(_,i)=>({
+    id:i, delay:i*0.12, size:60+i*80,
+  }));
+
+  const AURA_COLOR = tier===3?"#f59e0b":tier===2?"#06b6d4":"#ec4899";
+
   return(
-    <div onClick={onDone} style={{position:"fixed",inset:0,zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(0,0,0,0.9)",cursor:"pointer"}}>
-      <style>{`@keyframes cFall{0%{transform:translateY(-10px) rotate(0);opacity:1}100%{transform:translateY(110vh) rotate(720deg);opacity:0}}@keyframes popIn{0%{transform:scale(.3);opacity:0}60%{transform:scale(1.15)}100%{transform:scale(1);opacity:1}}@keyframes fPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.07)}}`}</style>
-      {particles.map(p=><div key={p.id} style={{position:"fixed",left:`${p.x}%`,top:-20,width:p.size,height:p.size,borderRadius:p.id%2?"50%":"3px",background:p.color,animation:`cFall ${p.dur}s ${p.delay}s ease-in forwards`,pointerEvents:"none"}}/>)}
-      <div style={{textAlign:"center",animation:"popIn .5s cubic-bezier(.4,2,.6,1) forwards"}}>
-        <div style={{fontSize:90,animation:"fPulse 1s ease infinite"}}>{reward.icon}</div>
-        <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:46,color:reward.color,letterSpacing:3,lineHeight:1,textShadow:`0 0 40px ${reward.color}`}}>{reward.label}</div>
-        <div style={{fontFamily:"monospace",fontSize:13,color:"#777",marginTop:12,letterSpacing:2}}>UNLOCKED! TAP TO CLAIM 🎉</div>
+    <div onClick={onDone} style={{position:"fixed",inset:0,zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",overflow:"hidden",
+      background: tier===3
+        ? "radial-gradient(ellipse at center, #1a0a00 0%, #000 70%)"
+        : tier===2
+        ? "radial-gradient(ellipse at center, #000a1a 0%, #000 70%)"
+        : "radial-gradient(ellipse at center, #1a000a 0%, #000 70%)",
+    }}>
+      <style>{`
+        @keyframes petalFall{0%{transform:translateY(-30px) rotate(0deg) translateX(0);opacity:1}100%{transform:translateY(110vh) rotate(540deg) translateX(var(--drift));opacity:0}}
+        @keyframes ringPulse{0%{transform:scale(0);opacity:.8}100%{transform:scale(1);opacity:0}}
+        @keyframes popIn{0%{transform:scale(.2) rotate(-10deg);opacity:0}60%{transform:scale(1.2) rotate(3deg)}100%{transform:scale(1) rotate(0);opacity:1}}
+        @keyframes auraGlow{0%,100%{opacity:.6;transform:scale(1)}50%{opacity:1;transform:scale(1.08)}}
+        @keyframes mangaFlash{0%{opacity:0}10%{opacity:1}20%{opacity:0}30%{opacity:.8}40%{opacity:0}100%{opacity:0}}
+        @keyframes textSlam{0%{transform:scale(2) skewX(-5deg);opacity:0}40%{transform:scale(.95) skewX(0);opacity:1}100%{transform:scale(1);opacity:1}}
+        @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
+      `}</style>
+
+      {/* Manga panel flash for tier 3 */}
+      {tier===3&&(
+        <div style={{position:"fixed",inset:0,background:"#fff",animation:"mangaFlash 1s ease forwards",pointerEvents:"none",zIndex:2}}/>
+      )}
+
+      {/* Cherry blossom petals (tier 1 + 3) */}
+      {(tier===1||tier===3)&&petals.map(p=>(
+        <div key={p.id} style={{
+          position:"fixed",left:`${p.x}%`,top:-30,
+          fontSize:p.size,
+          "--drift":`${p.drift}px`,
+          animation:`petalFall ${p.dur}s ${p.delay}s ease-in forwards`,
+          pointerEvents:"none",zIndex:3,
+        }}>🌸</div>
+      ))}
+
+      {/* Ki energy rings (tier 2 + 3) */}
+      {(tier===2||tier===3)&&rings.map(r=>(
+        <div key={r.id} style={{
+          position:"fixed",
+          width:r.size,height:r.size,
+          borderRadius:"50%",
+          border:`3px solid ${AURA_COLOR}`,
+          left:"50%",top:"50%",
+          marginLeft:-r.size/2,marginTop:-r.size/2,
+          animation:`ringPulse 1s ${r.delay}s ease-out forwards`,
+          pointerEvents:"none",zIndex:3,
+        }}/>
+      ))}
+
+      {/* Aura glow behind icon */}
+      <div style={{
+        position:"fixed",width:280,height:280,borderRadius:"50%",
+        background:`radial-gradient(circle, ${AURA_COLOR}55 0%, transparent 70%)`,
+        animation:"auraGlow 1.2s ease infinite",
+        pointerEvents:"none",zIndex:3,
+      }}/>
+
+      {/* Main content */}
+      <div style={{textAlign:"center",position:"relative",zIndex:4,padding:"0 24px"}}>
+        <div style={{fontSize:96,animation:"float 2s ease infinite",filter:`drop-shadow(0 0 30px ${AURA_COLOR})`}}>{reward.icon}</div>
+
+        {/* Tier label above */}
+        <div style={{fontFamily:"monospace",fontSize:11,color:AURA_COLOR,letterSpacing:4,marginBottom:8,opacity:.8}}>
+          {tier===3?"★ LEGENDARY ★":tier===2?"◆ RARE ◆":"● UNCOMMON ●"}
+        </div>
+
+        <div style={{
+          fontFamily:"'Bebas Neue',sans-serif",
+          fontSize:tier===3?52:46,
+          color:reward.color,letterSpacing:3,lineHeight:1,
+          textShadow:`0 0 40px ${reward.color}, 0 0 80px ${reward.color}88`,
+          animation:"textSlam .5s cubic-bezier(.4,2,.6,1) forwards",
+        }}>{reward.label}</div>
+
+        {tier===3&&(
+          <div style={{fontFamily:"monospace",fontSize:12,color:"#f59e0b",marginTop:8,letterSpacing:2,animation:"auraGlow 1s ease infinite"}}>
+            ✦ MAXIMUM POWER ACHIEVED ✦
+          </div>
+        )}
+
+        <div style={{fontFamily:"monospace",fontSize:11,color:"#666",marginTop:14,letterSpacing:2}}>
+          TAP TO CLAIM
+        </div>
       </div>
     </div>
   );
@@ -193,7 +306,7 @@ function BankBar({bankCoins,bankResetAt}){
     <div style={{...S.card,marginBottom:14,background:"#0f0a00",border:"1px solid #f59e0b22"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
-          <span style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:16,letterSpacing:2,color:"#f59e0b"}}>POINTS BANK</span>
+          <span style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:16,letterSpacing:2,color:"#f59e0b"}}>⚡ CHAKRA RESERVE</span>
         </div>
         <CoinBadge coins={bankCoins||0}/>
       </div>
@@ -263,9 +376,15 @@ function PowerUpShop({me,players,gameCode,onAction,onClose}){
 
         {step==="shop"&&(
           <>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
-              <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:26,letterSpacing:3}}>POWER-UP SHOP</div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+              <div>
+                <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:26,letterSpacing:3}}>⚔️ JUTSU DOJO</div>
+                <div style={{fontFamily:"monospace",fontSize:9,color:"#555",letterSpacing:2}}>SELECT YOUR TECHNIQUE</div>
+              </div>
               <CoinBadge coins={coins}/>
+            </div>
+            <div style={{fontFamily:"monospace",fontSize:10,color:"#444",fontStyle:"italic",marginBottom:16,borderLeft:"2px solid #222",paddingLeft:10}}>
+              "True power comes from within." — spend wisely, shinobi.
             </div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:20}}>
               {POWERUPS.map(pu=>{
@@ -273,19 +392,21 @@ function PowerUpShop({me,players,gameCode,onAction,onClose}){
                 return(
                   <button key={pu.id} onClick={()=>selectPowerup(pu)} disabled={!canAfford} style={{padding:"14px 10px",borderRadius:14,background:canAfford?`${pu.color}0f`:"#0f0f0f",border:`1.5px solid ${canAfford?pu.color+"44":"#1e1e1e"}`,cursor:canAfford?"pointer":"not-allowed",textAlign:"left",opacity:canAfford?1:.45,transition:"all .2s"}}>
                     <div style={{fontSize:26,marginBottom:6}}>{pu.icon}</div>
-                    <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:16,color:canAfford?pu.color:"#555",letterSpacing:1,marginBottom:4}}>{pu.name}</div>
-                    <div style={{fontFamily:"monospace",fontSize:9,color:"#666",lineHeight:1.4,marginBottom:8}}>{pu.desc}</div>
+                    <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:15,color:canAfford?pu.color:"#555",letterSpacing:1,marginBottom:3}}>{pu.name}</div>
+                    <div style={{fontFamily:"monospace",fontSize:9,color:"#666",lineHeight:1.4,marginBottom:4}}>{pu.desc}</div>
+                    <div style={{fontFamily:"monospace",fontSize:8,color:"#3a3a3a",fontStyle:"italic",marginBottom:8,lineHeight:1.3}}>"{pu.flavor}"</div>
                     <div style={{display:"inline-flex",alignItems:"center",gap:3,background:"#1a1400",borderRadius:10,padding:"2px 7px"}}>
-                      <span style={{fontSize:10}}>🪙</span>
+                      <span style={{fontSize:10}}>⚡</span>
                       <span style={{fontFamily:"monospace",fontSize:10,color:canAfford?"#f59e0b":"#555"}}>{pu.cost}</span>
                     </div>
                   </button>
                 );
               })}
             </div>
-            {/* Emoji unlock section */}
+            {/* Jutsu seal unlock section */}
             <div style={{borderTop:"1px solid #1e1e1e",paddingTop:16,marginBottom:16}}>
-              <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:16,letterSpacing:2,color:"#888",marginBottom:12}}>UNLOCK EMOJIS <span style={{fontSize:12,color:"#555"}}>({EMOJI_UNLOCK_COST}🪙 each)</span></div>
+              <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:16,letterSpacing:2,color:"#888",marginBottom:4}}>UNLOCK JUTSU SEALS</div>
+              <div style={{fontFamily:"monospace",fontSize:9,color:"#444",marginBottom:12}}>Rare emoji seals · {EMOJI_UNLOCK_COST}⚡ each</div>
               <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
                 {EMOJIS_LOCKED.map(e=>{
                   const owned=(me.unlockedEmojis||[]).includes(e);
@@ -307,7 +428,7 @@ function PowerUpShop({me,players,gameCode,onAction,onClose}){
           <>
             <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:20}}>
               <button onClick={()=>setStep("shop")} style={{background:"none",border:"none",color:"#555",cursor:"pointer",fontFamily:"monospace",fontSize:12}}>← BACK</button>
-              <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:22,letterSpacing:2}}>{selected.icon} {selected.name} — PICK TARGET</div>
+              <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:22,letterSpacing:2}}>{selected.icon} {selected.name} — CHOOSE RIVAL</div>
             </div>
             {others.map(p=>{
               const frozen=isFrozen(p);
@@ -333,13 +454,16 @@ function PowerUpShop({me,players,gameCode,onAction,onClose}){
         {step==="confirm"&&selected&&(
           <>
             <div style={{textAlign:"center",padding:"20px 0"}}>
-              <div style={{fontSize:64,marginBottom:12}}>{selected.icon}</div>
-              <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:28,color:selected.color,letterSpacing:3,marginBottom:8}}>{selected.name}</div>
-              {target&&<div style={{fontFamily:"monospace",fontSize:14,color:"#aaa",marginBottom:8}}>Target: {target.emoji} {target.name}</div>}
-              <div style={{fontFamily:"monospace",fontSize:12,color:"#666",marginBottom:20}}>{selected.desc}</div>
+              <div style={{fontSize:64,marginBottom:12,filter:`drop-shadow(0 0 20px ${selected.color})`}}>{selected.icon}</div>
+              <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:28,color:selected.color,letterSpacing:3,marginBottom:6}}>{selected.name}</div>
+              {target&&<div style={{fontFamily:"monospace",fontSize:13,color:"#aaa",marginBottom:6}}>Target: {target.emoji} {target.name}</div>}
+              <div style={{fontFamily:"monospace",fontSize:11,color:"#666",marginBottom:10}}>{selected.desc}</div>
+              <div style={{fontFamily:"monospace",fontSize:10,color:selected.color,fontStyle:"italic",marginBottom:20,padding:"8px 16px",background:`${selected.color}11`,borderRadius:10,border:`1px solid ${selected.color}22`}}>
+                "{selected.flavor}"
+              </div>
               <div style={{display:"inline-flex",alignItems:"center",gap:6,background:"#1a1400",border:"1px solid #f59e0b44",borderRadius:12,padding:"6px 16px",marginBottom:24}}>
-                <span>🪙</span>
-                <span style={{fontFamily:"monospace",fontSize:14,color:"#f59e0b"}}>−{selected.cost} coins</span>
+                <span>⚡</span>
+                <span style={{fontFamily:"monospace",fontSize:14,color:"#f59e0b"}}>−{selected.cost} chakra</span>
               </div>
               {/* Warn if target is shielded */}
               {target&&isBlocked(target)&&selected.id==="steal"&&(
@@ -474,87 +598,162 @@ function PointsLog({log}){
 
 // ─── Day grid ─────────────────────────────────────────────
 function DayGrid({player,isMe,onCheckin,onUncheck,weekKey}){
-  const [confirmUncheck,setConfirmUncheck]=useState(null); // day name waiting to confirm
+  const [confirmUncheck,setConfirmUncheck]=useState(null);
 
-  // Safely build this week's checkins, handling any legacy data format
+  // Safely build this week's checkins
   const rawCheckins=player.allCheckins||{};
   let wkCheckins={};
   const weekVal=rawCheckins[weekKey];
   if(weekVal&&typeof weekVal==="object") wkCheckins=weekVal;
 
-  const missed=passedDaysThisWeek();
   const frozen=isFrozen(player);
   const sabotaged=Array.isArray((player.sabotaged||{})[weekKey])?(player.sabotaged[weekKey]):[];
+  const todayName=getTodayName();
+  const yesterdayName=getYesterdayName();
 
-  function handleDayClick(day,pts){
+  // Which days are available to log (today + yesterday only for "me")
+  function getDayState(day){
+    const count=getCheckinCount(wkCheckins,day);
+    const isSabotaged=sabotaged.includes(day);
+    const isToday=day===todayName;
+    const isYesterday=day===yesterdayName;
+    const isAvailable=isMe&&!frozen&&!isSabotaged&&(isToday||isYesterday);
+    const canFirst=isAvailable&&count===0;
+    const canSecond=isAvailable&&count===1; // second workout
+    const isLocked=isMe&&!isToday&&!isYesterday&&count===0;
+    return{count,isSabotaged,isToday,isYesterday,isAvailable,canFirst,canSecond,isLocked};
+  }
+
+  function handleClick(day,basePts){
     if(!isMe) return;
-    const checked=!!wkCheckins[day];
-    if(checked){
-      // First tap on checked day = ask to confirm uncheck
-      if(confirmUncheck===day){ onUncheck(day,pts); setConfirmUncheck(null); }
-      else setConfirmUncheck(day);
-    } else {
+    const{count,canFirst,canSecond,isSabotaged,isLocked}=getDayState(day);
+    if(isLocked){ return; }
+    if(isSabotaged){ return; }
+    if(frozen){ return; }
+    if(count>0){
+      // Tap on already-checked: either confirm uncheck (1st) or add 2nd workout
+      if(confirmUncheck===day){
+        // Second tap = confirm uncheck first workout
+        onUncheck(day,basePts);
+        setConfirmUncheck(null);
+      } else if(canSecond){
+        // First tap on single-checked: show options via confirm state
+        setConfirmUncheck(day);
+      } else if(count===2){
+        setConfirmUncheck(day);
+      } else {
+        setConfirmUncheck(day);
+      }
+    } else if(canFirst){
       setConfirmUncheck(null);
-      if(!frozen&&!sabotaged.includes(day)) onCheckin(day,pts);
+      onCheckin(day,basePts,false);
     }
   }
 
+  function handleSecondWorkout(day,basePts){
+    onCheckin(day,basePts,true); // true = second workout
+    setConfirmUncheck(null);
+  }
+
+  function renderDay(day,basePts,isSat){
+    const{count,isSabotaged,isToday,isYesterday,canFirst,canSecond,isLocked}=getDayState(day);
+    const isConfirming=confirmUncheck===day;
+    const checkedColor=isSat?"#f59e0b":player.color;
+
+    let borderColor,bgColor,textColor;
+    if(isConfirming){
+      borderColor="#ef4444"; bgColor="#1a0a0a"; textColor="#ef4444";
+    } else if(count>0){
+      borderColor=checkedColor; bgColor=`${checkedColor}1a`; textColor=checkedColor;
+    } else if(isSabotaged){
+      borderColor="#8b5cf644"; bgColor="#120a1c"; textColor="#8b5cf6";
+    } else if(isToday&&isMe){
+      borderColor=checkedColor+"66"; bgColor=`${checkedColor}0a`; textColor=checkedColor+"aa";
+    } else if(isYesterday&&isMe){
+      borderColor="#444"; bgColor="#111"; textColor="#777";
+    } else if(isLocked){
+      borderColor="#1a1a1a"; bgColor="#0a0a0a"; textColor="#2a2a2a";
+    } else {
+      borderColor="#222"; bgColor="#0f0f0f"; textColor="#444";
+    }
+
+    let bottomLabel;
+    if(isConfirming) bottomLabel="↩?";
+    else if(count===2) bottomLabel="✓✓";
+    else if(count===1) bottomLabel="✓";
+    else if(isSabotaged) bottomLabel="💣";
+    else if(frozen&&isMe) bottomLabel="🧊";
+    else if(isToday&&isMe) bottomLabel=isSat?"+10":"+5";
+    else if(isYesterday&&isMe) bottomLabel="yest";
+    else if(isLocked) bottomLabel="🔒";
+    else if(isMe) bottomLabel=isSat?"+10":"+5";
+    else bottomLabel="·";
+
+    return(
+      <button key={day} onClick={()=>handleClick(day,basePts)} style={{
+        flex:1,padding:"10px 2px",borderRadius:10,
+        cursor:(canFirst||canSecond||count>0)&&isMe?"pointer":"default",
+        border:`1.5px solid ${borderColor}`,
+        background:bgColor, color:textColor,
+        fontFamily:"monospace",fontSize:10,
+        WebkitTapHighlightColor:"transparent",transition:"all .2s",
+        position:"relative",
+      }}>
+        {isToday&&isMe&&count===0&&<div style={{position:"absolute",top:2,right:2,width:5,height:5,borderRadius:"50%",background:checkedColor}}/>}
+        <div style={{fontWeight:"bold"}}>{isSat?"⭐":""}  {day}</div>
+        <div style={{marginTop:3,fontSize:11}}>{bottomLabel}</div>
+      </button>
+    );
+  }
+
+  // Confirm uncheck panel — shows options when tapping a checked day
+  const confirmDay=confirmUncheck;
+  const confirmCount=confirmDay?getCheckinCount(wkCheckins,confirmDay):0;
+  const confirmBasePts=confirmDay==="Sat"?10:5;
+
   return(
     <div>
-      {confirmUncheck&&(
-        <div style={{background:"#1a0a0a",border:"1px solid #ef444444",borderRadius:10,padding:"8px 12px",marginBottom:8,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-          <div style={{fontFamily:"monospace",fontSize:11,color:"#ef4444"}}>
-            ↩ Uncheck {confirmUncheck}? This removes those points.
+      {confirmDay&&(
+        <div style={{background:"#111",border:"1px solid #2a2a2a",borderRadius:12,padding:"10px 14px",marginBottom:8}}>
+          <div style={{fontFamily:"monospace",fontSize:11,color:"#aaa",marginBottom:8}}>
+            {confirmDay} · {confirmCount===1?"1 workout logged":"2 workouts logged"}
           </div>
-          <button onClick={()=>setConfirmUncheck(null)} style={{background:"none",border:"none",color:"#555",fontFamily:"monospace",fontSize:11,cursor:"pointer",padding:"0 4px"}}>✕</button>
+          <div style={{display:"flex",gap:6}}>
+            {confirmCount===1&&getDayState(confirmDay).canSecond&&(
+              <button onClick={()=>handleSecondWorkout(confirmDay,confirmBasePts)} style={{flex:1,padding:"8px 4px",borderRadius:10,background:"#10b98122",border:"1px solid #10b98166",color:"#10b981",fontFamily:"monospace",fontSize:10,cursor:"pointer"}}>
+                +2nd workout<br/><span style={{fontSize:9}}>+2 pts +2🪙</span>
+              </button>
+            )}
+            <button onClick={()=>{onUncheck(confirmDay,confirmBasePts);setConfirmUncheck(null);}} style={{flex:1,padding:"8px 4px",borderRadius:10,background:"#ef444422",border:"1px solid #ef444466",color:"#ef4444",fontFamily:"monospace",fontSize:10,cursor:"pointer"}}>
+              ↩ Uncheck<br/><span style={{fontSize:9}}>remove {confirmBasePts} pts</span>
+            </button>
+            <button onClick={()=>setConfirmUncheck(null)} style={{flex:1,padding:"8px 4px",borderRadius:10,background:"#1a1a1a",border:"1px solid #2a2a2a",color:"#555",fontFamily:"monospace",fontSize:10,cursor:"pointer"}}>
+              Cancel
+            </button>
+          </div>
         </div>
       )}
       <div style={{display:"flex",gap:4,marginBottom:4}}>
-        {DAYS.map(day=>{
-          const checked=!!wkCheckins[day];
-          const wasMissed=!checked&&missed.includes(day);
-          const isSabotaged=sabotaged.includes(day);
-          const isConfirming=confirmUncheck===day;
-          const canInteract=isMe&&!frozen&&!isSabotaged;
-          return(
-            <button key={day} onClick={()=>handleDayClick(day,5)} style={{
-              flex:1,padding:"10px 2px",borderRadius:10,
-              cursor:canInteract||checked?"pointer":"default",
-              border:`1.5px solid ${isConfirming?"#ef4444":checked?player.color:isSabotaged?"#8b5cf644":wasMissed?"#3a2020":"#222"}`,
-              background:isConfirming?"#1a0a0a":checked?`${player.color}1a`:isSabotaged?"#120a1c":wasMissed?"#1c1010":"#0f0f0f",
-              color:isConfirming?"#ef4444":checked?player.color:isSabotaged?"#8b5cf6":wasMissed?"#4a2a2a":"#444",
-              fontFamily:"monospace",fontSize:10,WebkitTapHighlightColor:"transparent",transition:"all .2s",
-            }}>
-              <div style={{fontWeight:"bold"}}>{day}</div>
-              <div style={{marginTop:3,fontSize:11}}>{isConfirming?"↩?":checked?"✓":isSabotaged?"💣":frozen?"🧊":wasMissed?"✗":isMe?"+5":"·"}</div>
-            </button>
-          );
-        })}
-        {(()=>{
-          const checked=!!wkCheckins["Sat"];
-          const isConfirming=confirmUncheck==="Sat";
-          const canInteract=isMe&&!frozen;
-          return(
-            <button onClick={()=>handleDayClick("Sat",10)} style={{
-              flex:1,padding:"10px 2px",borderRadius:10,
-              cursor:canInteract||checked?"pointer":"default",
-              border:`1.5px solid ${isConfirming?"#ef4444":checked?"#f59e0b":frozen?"#06b6d444":"#222"}`,
-              background:isConfirming?"#1a0a0a":checked?"#f59e0b1a":"#0f0f0f",
-              color:isConfirming?"#ef4444":checked?"#f59e0b":frozen?"#06b6d4":"#444",
-              fontFamily:"monospace",fontSize:10,WebkitTapHighlightColor:"transparent",
-            }}>
-              <div style={{fontWeight:"bold"}}>⭐Sat</div>
-              <div style={{marginTop:3,fontSize:11}}>{isConfirming?"↩?":checked?"✓":frozen?"🧊":isMe?"+10":"·"}</div>
-            </button>
-          );
-        })()}
+        {DAYS.map(day=>renderDay(day,5,false))}
+        {renderDay("Sat",10,true)}
       </div>
-      {isMe&&<div style={{fontFamily:"monospace",fontSize:9,color:"#333",textAlign:"center",marginTop:2}}>tap a checked day to undo it</div>}
-      {frozen&&isMe&&<div style={{fontFamily:"monospace",fontSize:9,color:"#06b6d4",textAlign:"center",marginTop:2}}>🧊 You are frozen! Check-ins blocked for {Math.ceil((player.frozenUntil-Date.now())/3600000)}h</div>}
-      {missed.length>0&&isMe&&!frozen&&<div style={{fontFamily:"monospace",fontSize:9,color:"#4a2a2a",textAlign:"center",marginTop:2}}>✗ missed days shown in red — keep going!</div>}
+      {isMe&&(
+        <div style={{display:"flex",gap:12,marginTop:4,justifyContent:"center"}}>
+          {todayName&&<div style={{fontFamily:"monospace",fontSize:9,color:"#555"}}>
+            <span style={{color:player.color}}>●</span> today
+          </div>}
+          {yesterdayName&&<div style={{fontFamily:"monospace",fontSize:9,color:"#555"}}>
+            yest = yesterday
+          </div>}
+          <div style={{fontFamily:"monospace",fontSize:9,color:"#333"}}>🔒 = future/past</div>
+        </div>
+      )}
+      {frozen&&isMe&&<div style={{fontFamily:"monospace",fontSize:9,color:"#06b6d4",textAlign:"center",marginTop:4}}>🧊 Frozen! {Math.ceil((player.frozenUntil-Date.now())/3600000)}h remaining</div>}
     </div>
   );
 }
+
+
 
 // ─── Reactions ────────────────────────────────────────────
 function ReactionBar({player,myId,gameCode,weekKey}){
@@ -713,7 +912,7 @@ function PlayerCard({player,isMe,onCheckin,onUncheck,onClaim,gameCode,weekKey,re
       {/* Power-up button for my card */}
       {isMe&&(
         <button onClick={onOpenShop} style={{width:"100%",marginTop:10,padding:"8px 16px",borderRadius:12,background:"#0f0a00",border:"1px solid #f59e0b33",color:"#f59e0b",fontFamily:"monospace",fontSize:11,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
-          <span>🪙</span> OPEN POWER-UP SHOP
+          <span>⚔️</span> OPEN JUTSU DOJO
         </button>
       )}
 
@@ -956,7 +1155,7 @@ function GameScreen({gameCode,playerId,onLeave}){
     });
   },[gameCode,playerId]);
 
-  const handleCheckin=useCallback(async(day,pts)=>{
+  const handleCheckin=useCallback(async(day,pts,isSecond=false)=>{
     const wk=getWeekKey();
     const ref=doc(db,"games",gameCode);
     let snap;
@@ -986,17 +1185,25 @@ function GameScreen({gameCode,playerId,onLeave}){
     }
 
     const wkCheckins=allCheckins[wk]||{};
-    if(wkCheckins[day]){ showToast("Already logged "+day+"!"); return; }
+    // Determine the key to use — second workout goes in day+"_2"
+    const dayKey=isSecond?day+"_2":day;
+    if(!isSecond&&wkCheckins[day]&&!wkCheckins[day+"_2"]){
+      // First already logged, only second is allowed via DayGrid — this path shouldn't hit
+      showToast("Use the day button to add 2nd workout."); return;
+    }
+    if(wkCheckins[dayKey]){ showToast("Already logged!"); return; }
 
-    // Sabotage check
-    if(Array.isArray((me.sabotaged||{})[wk])&&(me.sabotaged[wk]).includes(day)){
+    // Sabotage check (only blocks first workout)
+    if(!isSecond&&Array.isArray((me.sabotaged||{})[wk])&&(me.sabotaged[wk]).includes(day)){
       showToast("💣 That day was sabotaged!"); return;
     }
 
-    const isDouble=!!me.doubleNext;
-    const earnedPts=isDouble?pts*2:pts;
+    // Second workout earns +2 pts (smaller bonus)
+    const SECOND_BONUS=2;
+    const isDouble=!!me.doubleNext&&!isSecond; // double only applies to first workout
+    const earnedPts=isSecond?SECOND_BONUS:(isDouble?pts*2:pts);
     const newPoints=Math.min((me.points||0)+earnedPts,TIER_3);
-    const newAllCheckins={...allCheckins,[wk]:{...wkCheckins,[day]:true}};
+    const newAllCheckins={...allCheckins,[wk]:{...wkCheckins,[dayKey]:true}};
     const isNewWeek=(me.weekKey||"")!==wk;
 
     // Weekly history
@@ -1006,12 +1213,13 @@ function GameScreen({gameCode,playerId,onLeave}){
     }
     const weeklyPts=(isNewWeek?0:(me.weeklyPts||0))+earnedPts;
     const bestWeek=Math.max((me.stats&&me.stats.bestWeek)||0,weeklyPts);
-    const totalDays=((me.stats&&me.stats.totalDays)||0)+1;
+    const totalDays=isSecond?(me.stats&&me.stats.totalDays)||0:((me.stats&&me.stats.totalDays)||0)+1;
 
     // Daily streak using YYYY-MM-DD keys
     const todayStr=todayKey();
     const checkedDays=(me.stats&&me.stats.checkedDays)||[];
-    const newCheckedDays=checkedDays.includes(todayStr)?checkedDays:[...checkedDays,todayStr];
+    // Only add today to streak tracking for first workout of the day
+    const newCheckedDays=isSecond?checkedDays:checkedDays.includes(todayStr)?checkedDays:[...checkedDays,todayStr];
     const prunedCheckedDays=newCheckedDays.slice(-120);
     const newDailyStreak=calcDailyStreak(prunedCheckedDays);
 
@@ -1030,7 +1238,7 @@ function GameScreen({gameCode,playerId,onLeave}){
     const newBankCoins=bankCoins+coinsEarned;
 
     // Points log
-    const logEntry={day,pts:earnedPts,ts:Date.now(),label:isDouble?`${day} (DOUBLE!) check-in`:null};
+    const logEntry={day,pts:earnedPts,ts:Date.now(),label:isSecond?`${day} (2nd workout!)`:isDouble?`${day} (DOUBLE!) check-in`:null};
     const pointsLog=[...(me.pointsLog||[]),logEntry].slice(-100);
     if(coinsEarned>earnedPts){
       pointsLog.push({type:"coin",coins:coinsEarned-earnedPts,label:bonusMsg.trim(),ts:Date.now()});
@@ -1051,7 +1259,7 @@ function GameScreen({gameCode,playerId,onLeave}){
         [`players.${playerId}.stats.weeklyHistory`]:weeklyHistory,
         [`players.${playerId}.stats.checkedDays`]:prunedCheckedDays,
       });
-      showToast(`${day} logged! +${earnedPts} pts · +${coinsEarned}🪙${bonusMsg}${isDouble?" ⚡DOUBLE!":""}`);
+      showToast(`${day} logged!${isSecond?" (2nd workout)":""} +${earnedPts} pts · +${coinsEarned}⚡${bonusMsg}${isDouble?" ⚡ULTRA INSTINCT!":""}`);
     }catch(e){
       console.error("Checkin error:",e);
       showToast("Save failed — check your connection.");
@@ -1072,37 +1280,41 @@ function GameScreen({gameCode,playerId,onLeave}){
     const wkCheckins=(rawCheckins[wk]&&typeof rawCheckins[wk]==="object")?rawCheckins[wk]:{};
     if(!wkCheckins[day]){ showToast(`${day} wasn't checked in.`); return; }
 
-    // Was double active when this was checked? We can't know for sure, so just remove base pts
-    // (doubleNext would already be false by now after use)
-    const removePts=pts; // always remove base pts — fairest approach
+    // Determine what to remove — always remove first workout (base pts)
+    // Also remove second workout if it exists
+    const hasSecond=!!wkCheckins[day+"_2"];
+    const SECOND_BONUS=2;
+    const removePts=pts+(hasSecond?SECOND_BONUS:0);
     const newPoints=Math.max((me.points||0)-removePts,0);
+
     const newWkCheckins={...wkCheckins};
     delete newWkCheckins[day];
+    delete newWkCheckins[day+"_2"]; // remove second workout too if present
     const newAllCheckins={...rawCheckins,[wk]:newWkCheckins};
 
-    // Recalculate weeklyPts for this week
-    const newWeeklyPts=Object.entries(newWkCheckins).reduce((s,[k,v])=>v?s+(k==="Sat"?10:5):s,0);
+    // Recalculate weeklyPts for this week from remaining checkins
+    const newWeeklyPts=Object.entries(newWkCheckins).reduce((s,[k,v])=>{
+      if(!v) return s;
+      if(k.endsWith("_2")) return s+SECOND_BONUS;
+      return s+(k==="Sat"?10:5);
+    },0);
 
     // Remove coins earned from this check-in
     const newBankCoins=Math.max((me.bankCoins||0)-removePts,0);
 
-    // Remove today from checkedDays if no other check-ins remain today
-    // (only remove if this was the only check-in for today)
+    // Remove today from checkedDays if no other days are checked this week
     const todayStr=todayKey();
-    const otherCheckinToday=Object.keys(newWkCheckins).length>0&&
-      Object.keys(newWkCheckins).some(d=>{
-        // still has a check-in today (can't verify exact date, but if any remain keep it)
-        return true;
-      });
-    // Simple approach: only remove todayStr if no days are left checked this week
-    const anyLeftToday=Object.values(newWkCheckins).some(v=>v);
+    const anyLeftChecked=Object.values(newWkCheckins).some(v=>v);
     const checkedDays=(me.stats&&me.stats.checkedDays)||[];
-    const newCheckedDays=anyLeftToday?checkedDays:checkedDays.filter(d=>d!==todayStr);
+    const newCheckedDays=anyLeftChecked?checkedDays:checkedDays.filter(d=>d!==todayStr);
 
-    // Trim log — remove the most recent entry matching this day
+    // Trim log — remove the most recent entry(s) matching this day
     const log=[...(me.pointsLog||[])];
-    const lastIdx=log.map((e,i)=>({e,i})).reverse().find(({e})=>e.day===day&&!e.type);
-    if(lastIdx!==undefined) log.splice(lastIdx.i,1);
+    // Remove up to 2 entries for this day (first + possible second workout)
+    let removed=0;
+    for(let i=log.length-1;i>=0&&removed<2;i--){
+      if(log[i].day===day&&!log[i].type){ log.splice(i,1); removed++; }
+    }
 
     try{
       await updateDoc(ref,{
