@@ -473,7 +473,9 @@ function PointsLog({log}){
 }
 
 // ─── Day grid ─────────────────────────────────────────────
-function DayGrid({player,isMe,onCheckin,weekKey}){
+function DayGrid({player,isMe,onCheckin,onUncheck,weekKey}){
+  const [confirmUncheck,setConfirmUncheck]=useState(null); // day name waiting to confirm
+
   // Safely build this week's checkins, handling any legacy data format
   const rawCheckins=player.allCheckins||{};
   let wkCheckins={};
@@ -484,46 +486,70 @@ function DayGrid({player,isMe,onCheckin,weekKey}){
   const frozen=isFrozen(player);
   const sabotaged=Array.isArray((player.sabotaged||{})[weekKey])?(player.sabotaged[weekKey]):[];
 
+  function handleDayClick(day,pts){
+    if(!isMe) return;
+    const checked=!!wkCheckins[day];
+    if(checked){
+      // First tap on checked day = ask to confirm uncheck
+      if(confirmUncheck===day){ onUncheck(day,pts); setConfirmUncheck(null); }
+      else setConfirmUncheck(day);
+    } else {
+      setConfirmUncheck(null);
+      if(!frozen&&!sabotaged.includes(day)) onCheckin(day,pts);
+    }
+  }
+
   return(
     <div>
+      {confirmUncheck&&(
+        <div style={{background:"#1a0a0a",border:"1px solid #ef444444",borderRadius:10,padding:"8px 12px",marginBottom:8,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <div style={{fontFamily:"monospace",fontSize:11,color:"#ef4444"}}>
+            ↩ Uncheck {confirmUncheck}? This removes those points.
+          </div>
+          <button onClick={()=>setConfirmUncheck(null)} style={{background:"none",border:"none",color:"#555",fontFamily:"monospace",fontSize:11,cursor:"pointer",padding:"0 4px"}}>✕</button>
+        </div>
+      )}
       <div style={{display:"flex",gap:4,marginBottom:4}}>
         {DAYS.map(day=>{
           const checked=!!wkCheckins[day];
           const wasMissed=!checked&&missed.includes(day);
           const isSabotaged=sabotaged.includes(day);
-          const canCheck=isMe&&!checked&&!frozen&&!isSabotaged;
+          const isConfirming=confirmUncheck===day;
+          const canInteract=isMe&&!frozen&&!isSabotaged;
           return(
-            <button key={day} onClick={()=>canCheck&&onCheckin(day,5)} style={{
+            <button key={day} onClick={()=>handleDayClick(day,5)} style={{
               flex:1,padding:"10px 2px",borderRadius:10,
-              cursor:canCheck?"pointer":"default",
-              border:`1.5px solid ${checked?player.color:isSabotaged?"#8b5cf644":wasMissed?"#3a2020":"#222"}`,
-              background:checked?`${player.color}1a`:isSabotaged?"#120a1c":wasMissed?"#1c1010":"#0f0f0f",
-              color:checked?player.color:isSabotaged?"#8b5cf6":wasMissed?"#4a2a2a":"#444",
+              cursor:canInteract||checked?"pointer":"default",
+              border:`1.5px solid ${isConfirming?"#ef4444":checked?player.color:isSabotaged?"#8b5cf644":wasMissed?"#3a2020":"#222"}`,
+              background:isConfirming?"#1a0a0a":checked?`${player.color}1a`:isSabotaged?"#120a1c":wasMissed?"#1c1010":"#0f0f0f",
+              color:isConfirming?"#ef4444":checked?player.color:isSabotaged?"#8b5cf6":wasMissed?"#4a2a2a":"#444",
               fontFamily:"monospace",fontSize:10,WebkitTapHighlightColor:"transparent",transition:"all .2s",
             }}>
               <div style={{fontWeight:"bold"}}>{day}</div>
-              <div style={{marginTop:3,fontSize:11}}>{checked?"✓":isSabotaged?"💣":frozen?"🧊":wasMissed?"✗":isMe?"+5":"·"}</div>
+              <div style={{marginTop:3,fontSize:11}}>{isConfirming?"↩?":checked?"✓":isSabotaged?"💣":frozen?"🧊":wasMissed?"✗":isMe?"+5":"·"}</div>
             </button>
           );
         })}
         {(()=>{
           const checked=!!wkCheckins["Sat"];
-          const canCheck=isMe&&!checked&&!frozen;
+          const isConfirming=confirmUncheck==="Sat";
+          const canInteract=isMe&&!frozen;
           return(
-            <button onClick={()=>canCheck&&onCheckin("Sat",10)} style={{
+            <button onClick={()=>handleDayClick("Sat",10)} style={{
               flex:1,padding:"10px 2px",borderRadius:10,
-              cursor:canCheck?"pointer":"default",
-              border:`1.5px solid ${checked?"#f59e0b":frozen?"#06b6d444":"#222"}`,
-              background:checked?"#f59e0b1a":"#0f0f0f",
-              color:checked?"#f59e0b":frozen?"#06b6d4":"#444",
+              cursor:canInteract||checked?"pointer":"default",
+              border:`1.5px solid ${isConfirming?"#ef4444":checked?"#f59e0b":frozen?"#06b6d444":"#222"}`,
+              background:isConfirming?"#1a0a0a":checked?"#f59e0b1a":"#0f0f0f",
+              color:isConfirming?"#ef4444":checked?"#f59e0b":frozen?"#06b6d4":"#444",
               fontFamily:"monospace",fontSize:10,WebkitTapHighlightColor:"transparent",
             }}>
               <div style={{fontWeight:"bold"}}>⭐Sat</div>
-              <div style={{marginTop:3,fontSize:11}}>{checked?"✓":frozen?"🧊":isMe?"+10":"·"}</div>
+              <div style={{marginTop:3,fontSize:11}}>{isConfirming?"↩?":checked?"✓":frozen?"🧊":isMe?"+10":"·"}</div>
             </button>
           );
         })()}
       </div>
+      {isMe&&<div style={{fontFamily:"monospace",fontSize:9,color:"#333",textAlign:"center",marginTop:2}}>tap a checked day to undo it</div>}
       {frozen&&isMe&&<div style={{fontFamily:"monospace",fontSize:9,color:"#06b6d4",textAlign:"center",marginTop:2}}>🧊 You are frozen! Check-ins blocked for {Math.ceil((player.frozenUntil-Date.now())/3600000)}h</div>}
       {missed.length>0&&isMe&&!frozen&&<div style={{fontFamily:"monospace",fontSize:9,color:"#4a2a2a",textAlign:"center",marginTop:2}}>✗ missed days shown in red — keep going!</div>}
     </div>
@@ -595,7 +621,7 @@ function EditProfile({player,gameCode,onClose}){
 }
 
 // ─── Player card ──────────────────────────────────────────
-function PlayerCard({player,isMe,onCheckin,onClaim,gameCode,weekKey,rewards,onOpenShop}){
+function PlayerCard({player,isMe,onCheckin,onUncheck,onClaim,gameCode,weekKey,rewards,onOpenShop}){
   const [expanded,setExpanded]=useState(true); // always start open
   const points=player.points||0;
   const claimed=player.claimed||[];
@@ -680,7 +706,7 @@ function PlayerCard({player,isMe,onCheckin,onClaim,gameCode,weekKey,rewards,onOp
         );
       })}
 
-      {(expanded||!isMe)&&<DayGrid player={player} isMe={isMe} onCheckin={onCheckin} weekKey={weekKey}/>}
+      {(expanded||!isMe)&&<DayGrid player={player} isMe={isMe} onCheckin={onCheckin} onUncheck={onUncheck} weekKey={weekKey}/>}
 
       <ReactionBar player={player} myId={null} gameCode={gameCode} weekKey={weekKey}/>
 
@@ -1032,6 +1058,69 @@ function GameScreen({gameCode,playerId,onLeave}){
     }
   },[gameCode,playerId]);
 
+  const handleUncheck=useCallback(async(day,pts)=>{
+    const wk=getWeekKey();
+    const ref=doc(db,"games",gameCode);
+    let snap;
+    try{ snap=await getDoc(ref); }catch(e){ showToast("Connection error."); return; }
+    if(!snap.exists()) return;
+    const me=snap.data().players?.[playerId];
+    if(!me) return;
+
+    // Safely read allCheckins
+    const rawCheckins=me.allCheckins||{};
+    const wkCheckins=(rawCheckins[wk]&&typeof rawCheckins[wk]==="object")?rawCheckins[wk]:{};
+    if(!wkCheckins[day]){ showToast(`${day} wasn't checked in.`); return; }
+
+    // Was double active when this was checked? We can't know for sure, so just remove base pts
+    // (doubleNext would already be false by now after use)
+    const removePts=pts; // always remove base pts — fairest approach
+    const newPoints=Math.max((me.points||0)-removePts,0);
+    const newWkCheckins={...wkCheckins};
+    delete newWkCheckins[day];
+    const newAllCheckins={...rawCheckins,[wk]:newWkCheckins};
+
+    // Recalculate weeklyPts for this week
+    const newWeeklyPts=Object.entries(newWkCheckins).reduce((s,[k,v])=>v?s+(k==="Sat"?10:5):s,0);
+
+    // Remove coins earned from this check-in
+    const newBankCoins=Math.max((me.bankCoins||0)-removePts,0);
+
+    // Remove today from checkedDays if no other check-ins remain today
+    // (only remove if this was the only check-in for today)
+    const todayStr=todayKey();
+    const otherCheckinToday=Object.keys(newWkCheckins).length>0&&
+      Object.keys(newWkCheckins).some(d=>{
+        // still has a check-in today (can't verify exact date, but if any remain keep it)
+        return true;
+      });
+    // Simple approach: only remove todayStr if no days are left checked this week
+    const anyLeftToday=Object.values(newWkCheckins).some(v=>v);
+    const checkedDays=(me.stats&&me.stats.checkedDays)||[];
+    const newCheckedDays=anyLeftToday?checkedDays:checkedDays.filter(d=>d!==todayStr);
+
+    // Trim log — remove the most recent entry matching this day
+    const log=[...(me.pointsLog||[])];
+    const lastIdx=log.map((e,i)=>({e,i})).reverse().find(({e})=>e.day===day&&!e.type);
+    if(lastIdx!==undefined) log.splice(lastIdx.i,1);
+
+    try{
+      await updateDoc(ref,{
+        [`players.${playerId}.points`]:newPoints,
+        [`players.${playerId}.allCheckins`]:newAllCheckins,
+        [`players.${playerId}.weeklyPts`]:newWeeklyPts,
+        [`players.${playerId}.bankCoins`]:newBankCoins,
+        [`players.${playerId}.pointsLog`]:log.slice(-100),
+        [`players.${playerId}.stats.checkedDays`]:newCheckedDays,
+        [`players.${playerId}.stats.totalDays`]:Math.max((me.stats?.totalDays||0)-1,0),
+      });
+      showToast(`${day} unchecked. -${removePts} pts · -${removePts}🪙`);
+    }catch(e){
+      console.error("Uncheck error:",e);
+      showToast("Failed to uncheck. Try again.");
+    }
+  },[gameCode,playerId]);
+
   const handleClaim=useCallback(async(pts)=>{
     const ref=doc(db,"games",gameCode);
     const snap=await getDoc(ref);
@@ -1253,7 +1342,7 @@ function GameScreen({gameCode,playerId,onLeave}){
 
         {activeTab==="players"&&players.map(player=>(
           <div key={player.id} style={{animation:"slideUp .3s ease"}}>
-            <PlayerCard player={player} isMe={player.id===playerId} onCheckin={handleCheckin} onClaim={handleClaim} gameCode={gameCode} weekKey={weekKey} rewards={rewards} onOpenShop={()=>setShowShop(true)}/>
+            <PlayerCard player={player} isMe={player.id===playerId} onCheckin={handleCheckin} onUncheck={handleUncheck} onClaim={handleClaim} gameCode={gameCode} weekKey={weekKey} rewards={rewards} onOpenShop={()=>setShowShop(true)}/>
           </div>
         ))}
 
